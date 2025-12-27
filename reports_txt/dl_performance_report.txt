@@ -1,0 +1,71 @@
+# Deep Learning Performance Report (Steps 23-26)
+
+## Executive Summary
+We implemented and evaluated four Deep Learning architectures: **DNN (Feedforward), CNN-1D (Spatial), LSTM and GRU (Temporal)**. 
+
+**Key Findings:**
+1.  **Accuracy**: **CNN-1D** achieved the highest accuracy (**99.53%**) on clean data, closely followed by **DNN (99.31%)**.
+2.  **Latency**: **CNN** and **DNN** are extremely fast (~0.09 ms/sample), making them suitable for real-time edge deployment.
+3.  **RNN Trade-off**: LSTM and GRU provided excellent accuracy (~98.8%) but were **3x slower** in inference than CNNs/DNNs due to their sequential processing nature.
+4.  **Robustness**: **DNN** proved to be the most robust DL model against severe noise, maintaining **91.7% accuracy**, whereas CNNs dropped to **82.6%**.
+
+## 1. Model Performance (Clean Data)
+Testing performed on the held-out Test Set (24,624 samples).
+
+| Model | Accuracy | F1-Score | Latency (ms/sample) | Model Size (MB) |
+| :--- | :--- | :--- | :--- | :--- |
+| **CNN-1D** | **99.53%** | 0.9955 | **0.093** | 0.56 |
+| **DNN** | 99.31% | 0.9937 | 0.094 | **0.17** |
+| **LSTM** | 98.79% | 0.9893 | 0.277 | 0.28 |
+| **GRU** | 98.78% | 0.9889 | 0.288 | 0.23 |
+
+## 2. Robustness to Noise (IoT Scenario)
+Evaluating performance under simulated wireless interference (Gaussian Noise).
+
+| Noise Level | DNN Acc | CNN Acc | LSTM Acc | GRU Acc |
+| :--- | :--- | :--- | :--- | :--- |
+| **Clean (0.0)** | 99.3% | 99.5% | 98.8% | 98.8% |
+| **Low (0.01)** | 99.3% | 99.5% | 98.8% | 98.7% |
+| **Med (0.05)** | 97.7% | 98.0% | 96.9% | 97.2% |
+| **High (0.10)** | 95.4% | 94.1% | 93.9% | 94.4% |
+| **Severe (0.20)** | **91.7%** | 82.6% | 89.6% | 87.3% |
+
+**Insight**: The **DNN** architecture with Dropout regularization demonstrated superior stability against noise compared to the more complex CNN and RNN structures. CNNs, which rely on precise local feature patterns, were most affected by high noise levels.
+
+## 3. Deep Learning Pseudo-code
+```python
+FUNCTION Train_Deep_Learning(Train_Set, Test_Set):
+    # 1. Data Preparation
+    # Reshape for CNN/RNN: (Samples, Features) -> (Samples, Features, 1)
+    Train_3D = Reshape(Train_Set.X, shape=(N, 25, 1))
+    
+    # 2. Architecture Definition (Example: CNN)
+    Model = Sequential([
+        Input(shape=(25, 1)),
+        Conv1D(filters=64, kernel=3, activation='relu'),
+        MaxPooling1D(pool=2),
+        Flatten(),
+        Dense(64, activation='relu'),
+        Dense(Num_Classes, activation='softmax')
+    ])
+    
+    # 3. Optimization
+    Model.Compile(optimizer='Adam', loss='CategoricalCrossentropy')
+    
+    # 4. Training
+    Model.Fit(Train_3D, Train_Set.y, 
+              epochs=10, 
+              callbacks=[EarlyStopping(patience=3)])
+              
+    RETURN Evaluate(Model, Test_Set)
+END FUNCTION
+```
+
+## 4. Comparison with Classical ML
+- **DL vs Tree-based (XGB/LGBM)**: DL models (99.5%) are slightly less accurate than XGBoost (99.9%) on clean data but are generally **more robust** to noise (DNN 91.7% vs XGB 34.1%).
+- **Recommendation**: For environments with significant noise or adversarial attacks, **Deep Learning (DNN) provides a better safety margin** than Tree-based models.
+
+## 4. Conclusion
+For a robust IoT Intrusion Detection System (IDS):
+- **Deployment Recommendation**: **DNN** offers the best balance of **Speed** (0.09ms), **Size** (0.17MB), and **Robustness** (91.7%).
+- **Alternative**: **CNN-1D** is excellent for clean environments where maximum accuracy is required but degrades faster under noise.

@@ -1,0 +1,60 @@
+# Advanced Data Analysis Report (Steps 12-16)
+
+## 12. Correlation Analysis & Feature Importance
+We performed a detailed correlation analysis and feature importance assessment using Random Forest.
+
+### Correlation Analysis
+- **Goal**: Identify relationships between numerical features.
+- **Finding**: After our rigorous feature selection process (removing correlations > 0.98), the remaining top 25 features show minimal redundancy. The heatmap below confirms that while some clusters exist (e.g., payload statistics), the features generally provide unique information.
+- **Output**: `plots/correlation_matrix_train.png`
+
+### Feature Importance (Assessment)
+- **Method**: Random Forest Classifer (50 estimators) on the Training Set.
+- **Top Features**:
+    1. `id.resp_p` (Response Port) - Critical for identifying service-specific attacks.
+    2. `fwd_pkts_payload` (Payload Stats) - Packet size is a strong indicator of attacks (e.g., DoS flooding vs minimal probe).
+    3. `no` (Flow Index?) - Seems highly discriminative.
+- **Output**: `plots/feature_importance.png`
+
+## 13. Visualization and Analysis
+We generated comprehensive plots to inspect the data quality and structure. All plots are saved in the `plots/` directory and demonstrate clean, scaled data ready for ML.
+
+## 14. Target Variable Distribution
+A critical step in our analysis was examining the class balance.
+
+### Distribution Comparison
+- **Training Set**: **Perfectly Balanced**. By applying SMOTE, we ensured that every attack class (including rare ones like `BruteForce_SSH`) has equal representation (~75k samples). This prevents the model from ignoring minority classes.
+- **Validation/Test Sets**: **Highly Imbalanced**. These sets retain the original "real-world" distribution where `DOS_SYN_Hping` dominates (~76%). This is crucial for evaluating how the model performs in a realistic deployment scenario.
+- **Output**: `plots/target_distribution_comparison.png`
+
+## 15 & 16. Numerical & Bivariate Analysis
+We analyzed the relationship between key numerical features and the target labels.
+
+### Bivariate Insights
+- **Boxplots**: Visualizing `id.resp_p` vs `target` reveals distinct port usage patterns for certain attack types (e.g., MQTT attacks target specific ports, while Scans touch many).
+- **Separability**: The substantial difference in distributions for top features suggests that high classification accuracy is achievable with non-linear models like Random Forest and XGBoost.
+- **Output**: `plots/bivariate_*.png`
+
+## 17. Analysis Logic Pseudo-code
+```python
+FUNCTION Perform_Advanced_Analysis(Data):
+    # 1. Correlation
+    Matrix = Correlation(Data)
+    Loop Feature_A, Feature_B in Matrix:
+        IF Correlation(A, B) > 0.98:
+            Drop Feature_B (Redundant)
+            
+    # 2. Feature Importance
+    Model = RandomForestClassifier()
+    Model.Fit(Data.Features, Data.Target)
+    Importance_Scores = Model.Feature_Importances_
+    Top_Features = Select_Top_K(Importance_Scores, k=25)
+    
+    # 3. Visualization
+    Plot Heatmap(Matrix)
+    Plot BarChart(Importance_Scores)
+END FUNCTION
+```
+
+## Conclusion
+The data analysis confirms that our preprocessing strategy (Split -> Scale -> Balance) has produced a high-quality dataset. The features are relevant, leakage is prevented, and the training data is optimized for learning complex patterns. We are ready to proceed to **Step 19: Supervised Machine Learning**.

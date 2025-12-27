@@ -1,0 +1,31 @@
+EDA Q&A SESSIONS
+================
+
+Q1: What is the size of the dataset?
+A1: The dataset has 123117 rows and 85 columns.
+
+Q2: What is the distribution of the target variable (Attack_type)?
+A2: The class distribution is as follows:
+DOS_SYN_Hping                 94659
+Thing_Speak                    8108
+ARP_poisioning                 7750
+MQTT_Publish                   4146
+NMAP_UDP_SCAN                  2590
+NMAP_XMAS_TREE_SCAN            2010
+NMAP_OS_DETECTION              2000
+NMAP_TCP_scan                  1002
+DDOS_Slowloris                  534
+Wipro_bulb                      253
+Metasploit_Brute_Force_SSH       37
+NMAP_FIN_SCAN                    28
+
+Q3: Are there missing values?
+A3: There are 0 missing values in total.
+
+Q4: Which numerical features are highly correlated?
+A4: Found 24 pairs with correlation > 0.95.
+    - bwd_pkts_tot vs bwd_data_pkts_tot: 0.9930
+    - fwd_pkts_per_sec vs bwd_pkts_per_sec: 1.0000
+    - fwd_pkts_per_sec vs flow_pkts_per_sec: 1.0000
+    - bwd_pkts_per_sec vs flow_pkts_per_sec: 1.0000
+    - bwd_pkts_tot vs bwd_header_size_tot: 0.9852

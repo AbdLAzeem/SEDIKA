@@ -1,0 +1,72 @@
+# Supervised Machine Learning Report (Steps 19-22)
+
+## Executive Summary
+We implemented and evaluated six supervised machine learning models: **Random Forest, XGBoost, LightGBM, SVM, Decision Tree, and KNN**. 
+
+**Key Findings:**
+1.  **Accuracy Champion**: **LightGBM** and **XGBoost** achieved the highest accuracy (**99.89%** and **99.88%**) with extremely low inference latency, making them ideal for high-throughput clean environments.
+2.  **Robustness Champion**: **KNN** proved to be the most resilient to noise, maintaining **94.4% accuracy** even under heavy noise (0.2 std dev), whereas tree-based models collapsed to <60%.
+3.  **IoT Trade-off**: There is a clear trade-off between **Latency** (Tree models are fast) and **Robustness** (Distance models like KNN are stable but slower).
+
+## 1. Model Performance (Clean Data)
+Testing performed on the held-out Test Set (24,624 samples).
+
+| Model | Accuracy | F1-Score | Latency (ms/sample) | Model Size (MB) |
+| :--- | :--- | :--- | :--- | :--- |
+| **LightGBM** | **99.89%** | 0.9989 | 0.051 | 4.12 |
+| **XGBoost** | 99.88% | 0.9988 | 0.014 | 1.74 |
+| **Random Forest** | 99.86% | 0.9986 | 0.009 | 12.91 |
+| **Decision Tree** | 99.73% | 0.9973 | **0.0006** | **0.30** |
+| **KNN** | 99.66% | 0.9967 | 3.592 | 154.69 |
+| **SVM** | 92.00%* | 0.9048 | 2.198 | 4.83 |
+
+*\*SVM was trained on a subset (50k) due to computational complexity, explaining the lower accuracy.*
+
+## 2. Robustness to Noise (Wireless IoT Scenario)
+Wireless IoT links are prone to noise. We simulated this by adding Gaussian noise to the test features.
+
+| Noise Level | KNN Acc | SVM Acc | RF Acc | XGBoost Acc | LightGBM Acc |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Clean (0.0)** | 99.7% | 92.0% | 99.9% | 99.9% | 99.9% |
+| **Low (0.01)** | **99.6%** | **92.0%** | 67.6% | 56.2% | 52.5% |
+| **Med (0.05)** | **98.7%** | **92.1%** | 62.0% | 50.2% | 36.3% |
+| **High (0.10)** | **97.1%** | **92.0%** | 59.0% | 43.0% | 31.7% |
+| **Severe (0.20)** | **94.4%** | **91.6%** | 53.1% | 34.1% | 28.5% |
+
+**Insight**: Tree-based models (RF, XGB, LGBM) rely on precise feature thresholds. Noise causes values to jump these thresholds, leading to catastrophic failure. Distance-based models (KNN, SVM) are inherently smoothing and handle noise much better.
+
+## 3. IoT Performance Metrics
+- **Latency**: **Decision Tree** is the fastest (0.0006 ms), suitable for ultra-low-power microcontrollers. **KNN** is the slowest (3.6 ms), potentially introducing bottlenecks.
+- **Memory Footprint**: **Decision Tree** is tiny (0.3 MB). **KNN** requires storing the entire dataset (154 MB), which is prohibitive for edge devices.
+
+## 4. Training Algorithm Pseudo-code
+```python
+FUNCTION Train_Supervised_Models(Train_Set, Test_Set):
+    Models = [RandomForest, XGBoost, LightGBM, SVM, KNN, DecisionTree]
+    Results = []
+    
+    FOR Model IN Models:
+        # A. Training
+        Start_Timer()
+        Model.Fit(Train_Set.X, Train_Set.y)
+        Train_Time = Stop_Timer()
+        
+        # B. Inference Evaluation
+        Start_Timer()
+        Predictions = Model.Predict(Test_Set.X)
+        Latency = Stop_Timer() / Count(Test_Set)
+        
+        # C. Robustness Testing (Noise Injection)
+        Noise_Levels = [0.01, 0.05, 0.1, 0.2]
+        FOR Level IN Noise_Levels:
+            Noisy_X = Test_Set.X + GaussianNoise(std=Level)
+            Noisy_Acc = Accuracy(Model.Predict(Noisy_X), Test_Set.y)
+            Log(Model, Level, Noisy_Acc)
+            
+    RETURN Results
+END FUNCTION
+```
+
+## 5. Discussion & Recommendation
+- For **Gateways/Edge Servers** with stable connections: **LightGBM** or **XGBoost** are recommended for their superior accuracy and speed.
+- For **Noisy Wireless Links**: **KNN** is robust but memory-heavy. A hybrid approach or training the tree models with noise augmentation is suggested to improve their robustness.

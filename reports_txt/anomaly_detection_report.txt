@@ -1,0 +1,64 @@
+# Anomaly Detection Report (Step 27)
+
+## Executive Summary
+We implemented **Unsupervised Anomaly Detection** to identify unknown "Zero-Day" attacks. Unlike supervised models that require labeled training data for every attack type, these models train *only* on normal traffic and flag anything deviating from it as an anomaly.
+
+**Key Findings:**
+1.  **Champion**: **Deep Autoencoder** achieved an impressive **AUROC of 0.9824**, proving highly effective at distinguishing normal IoT traffic from attacks.
+2.  **Baseline**: **Isolation Forest** also performed well (AUROC 0.9622) but was outperformed by the deep learning approach.
+3.  **Implication**: The system can successfully detect novel attacks it has never seen before, adding a critical layer of security alongside the supervised classification models.
+
+## 1. Methodology
+- **Assumption**: Traffic labeled as `Thing_Speak` (IoT Cloud Communication) represents authorized "Normal" behavior.
+- **Training**: Models were trained exclusively on this "Normal" data.
+- **Testing**: Models were evaluated on a mixed dataset containing both Normal and various Attack types.
+
+## 2. Model Performance
+Performance is measured using **AUROC** (Area Under the Receiver Operating Characteristic Curve), where 1.0 is perfect detection.
+
+| Model | AUROC | Description |
+| :--- | :--- | :--- |
+| **Autoencoder** | **0.9824** | Deep Learning model that learns to reconstruct normal patterns. High reconstruction error = Anomaly. |
+| **Isolation Forest** | 0.9622 | Tree-based algorithm that isolates outliers. Efficient for tabular data. |
+
+## 3. Detailed Analysis
+### Autoencoder (Deep Learning)
+- **Architecture**: Feedforward Neural Network (Encoder-Decoder) with bottleneck layer.
+- **Performance**: The high AUROC indicates that the Autoencoder successfully "learned" the complex non-linear correlations of legitimate traffic. When faced with attacks (DoS, Scan, etc.), it failed to reconstruct them accurately, triggering an alarm.
+
+### Isolation Forest (Statistical)
+- **Performance**: While effective, it struggled slightly more than the Autoencoder, likely because some attack patterns (like low-rate scanning) might statistically resemble normal traffic in simple feature space.
+
+## 4. Anomaly Detection Pseudo-code
+```python
+FUNCTION Train_Anomaly_Detection(Train_Set, Test_Set):
+    # 1. Filter Normal Traffic
+    # Assume Class 0 ('Thing_Speak') is Normal
+    Normal_Train = Train_Set.X WHERE Train_Set.y == 'Normal'
+    
+    # A. Autoencoder Approach
+    Encoder = Dense(16) -> Dense(8) # Compress
+    Decoder = Dense(16) -> Dense(25) # Reconstruct
+    Autoencoder = Model(Encoder + Decoder)
+    
+    # Train to reconstruct ONLY Normal data
+    Autoencoder.Fit(Normal_Train, Target=Normal_Train, loss='MSE')
+    
+    # Detect
+    Reconstruction = Autoencoder.Predict(Test_Set.X)
+    Error = MeanSquaredError(Test_Set.X, Reconstruction)
+    IF Error > Threshold THEN Anomaly ELSE Normal
+    
+    # B. Isolation Forest Approach
+    IsoForest = IsolationForest(contamination=0.1)
+    IsoForest.Fit(Normal_Train)
+    Anomaly_Score = IsoForest.Predict(Test_Set.X)
+    
+    RETURN AUROC(Error, Test_Set.Labels), AUROC(Anomaly_Score, Test_Set.Labels)
+END FUNCTION
+```
+
+## 5. Conclusion & Recommendation
+For a comprehensive **Defense-in-Depth** strategy:
+- Deploy the **Supervised LightGBM/DNN** models to instantly block *known* threats with >99% accuracy.
+- Deploy the **Unsupervised Autoencoder** in parallel to flag *unknown/zero-day* anomalies for manual review.

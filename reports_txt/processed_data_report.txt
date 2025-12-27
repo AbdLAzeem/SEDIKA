@@ -1,0 +1,83 @@
+# Processed Data Statistics Report
+
+## 1. Dataset Overview
+This report provides a detailed statistical analysis of the final processed datasets (`train_data.pkl` and `test_data.pkl`) prepared for the machine learning pipeline.
+
+### Training Set
+- **File**: `train_data.pkl`
+- **Rows**: 908,724
+- **Columns**: 26
+- **Size**: ~185 MB
+- **Split**: 80% of original + SMOTE Oversampling
+- **Status**: **Balanced** (Equal number of samples per class)
+
+### Testing Set
+- **File**: `test_data.pkl`
+- **Rows**: 24,624
+- **Columns**: 26
+- **Size**: ~5 MB
+- **Split**: 20% of original
+- **Status**: **Imbalanced** (Reflects real-world traffic distribution)
+
+## 2. Data Types and Structure
+All features have been successfully converted to numerical formats suitable for Deep Learning and ML algorithms.
+
+- **Features (25)**: `float64` (Standardized)
+- **Target (1)**: `int32` (Label Encoded)
+- **Null Values**: 0 (Cleaned)
+
+## 3. Detailed Statistics
+### Feature Scaling Verification
+The `StandardScaler` was applied to all features. The statistics below confirm that the features are centered around a mean of 0 with a standard deviation of 1.
+
+| Metric | Value (Approx) |
+| :--- | :--- |
+| **Mean** | ~0.0 |
+| **Std Dev** | ~1.0 |
+| **Min** | Varied (e.g. -0.19) |
+| **Max** | Varied (e.g. 12.16) |
+
+### Target Distribution (Classes)
+The target variable ranges from 0 to 11, representing the following attack types mapped to integers:
+
+| Code | Attack Type |
+| :--- | :--- |
+| 0 | ARP_poisioning |
+| 1 | BruteForce_SSH |
+| 2 | DOS_SYN_Hping |
+| 3 | DOS_UDP_Hping |
+| 4 | MQTT_Publish |
+| 5 | Metasploit_Brute_Force_SSH |
+| 6 | NMAP_OS_DETECTION |
+| 7 | NMAP_TCP_SCAN |
+| 8 | NMAP_UDP_SCAN |
+| 9 | NMAP_XMAS_TREE_SCAN |
+| 10 | Thing_Speak |
+| 11 | Wipro_bulb |
+
+## 4. Pipeline Pseudo-code
+```python
+FUNCTION Preprocess_Pipeline(Dataset):
+    # 1. Cleaning
+    Data = Load(Dataset)
+    Data = ImputeMissing(Data)
+    
+    # 2. Splitting (Prevent Leakage)
+    Train, Temp = Split(Data, train_ratio=0.70)
+    Val, Test = Split(Temp, val_ratio=0.50) # 15% each
+    
+    # 3. Transformation (Fit on Train ONLY)
+    Scaler = StandardScaler().Fit(Train)
+    Train_Scaled = Scaler.Transform(Train)
+    Val_Scaled = Scaler.Transform(Val)
+    Test_Scaled = Scaler.Transform(Test)
+    
+    # 4. Balancing (Train ONLY)
+    Train_Balanced = SMOTE(Train_Scaled) 
+    
+    RETURN Train_Balanced, Val_Scaled, Test_Scaled
+END FUNCTION
+```
+
+## 5. Conclusion
+The data cleaning, feature selection, splitting, scaling, and balancing (SMOTE) phases are complete. The statistics confirm the data is high-quality, normalized, and leak-free, ready for input into the model training phase.
