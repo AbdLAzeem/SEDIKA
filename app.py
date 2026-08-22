@@ -134,21 +134,30 @@ DATA_DIR  = (os.path.join(BASE_DIR, "processed_data")
 # ── Resource loading ──────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Loading models…")
 def load_resources():
-    import tensorflow as tf  # lazy — not needed until models are actually loaded
-    lgbm     = joblib.load(os.path.join(MODEL_DIR, "lightgbm.pkl"))
-    dnn      = tf.keras.models.load_model(os.path.join(MODEL_DIR, "dnn.keras"))
-    if_mod   = joblib.load(os.path.join(MODEL_DIR, "if_model.joblib"))
-    ae_mod   = tf.keras.models.load_model(os.path.join(MODEL_DIR, "ae_model.keras"))
+    # TensorFlow is optional — not available on Python 3.14+ cloud environments
+    try:
+        import tensorflow as tf
+        _TF = tf
+    except ImportError:
+        _TF = None
 
-    # threshold — new path (sedika_ae_threshold.joblib) with legacy fallback
+    lgbm   = joblib.load(os.path.join(MODEL_DIR, "lightgbm.pkl"))
+    if_mod = joblib.load(os.path.join(MODEL_DIR, "if_model.joblib"))
+
+    dnn    = None
+    ae_mod = None
+    if _TF is not None:
+        dnn    = _TF.keras.models.load_model(os.path.join(MODEL_DIR, "dnn.keras"))
+        ae_mod = _TF.keras.models.load_model(os.path.join(MODEL_DIR, "ae_model.keras"))
+
+    # threshold — new path with legacy fallback
     thresh_candidates = [
-        os.path.join(MODEL_DIR,  "sedika_ae_threshold.joblib"),
-        os.path.join(DATA_DIR,   "ae_threshold.joblib"),
+        os.path.join(MODEL_DIR, "sedika_ae_threshold.joblib"),
+        os.path.join(DATA_DIR,  "ae_threshold.joblib"),
     ]
     ae_thresh_obj = next(
         (joblib.load(p) for p in thresh_candidates if os.path.exists(p)), None
     )
-    # threshold object may be a plain float or a dict with 'threshold' key
     if isinstance(ae_thresh_obj, dict):
         ae_thresh = float(ae_thresh_obj.get("threshold", 1.0))
     elif ae_thresh_obj is not None:
@@ -156,9 +165,9 @@ def load_resources():
     else:
         ae_thresh = 1.0
 
-    scaler   = load_artifact(os.path.join(DATA_DIR, "scaler.joblib"))
-    le       = load_artifact(os.path.join(DATA_DIR, "label_encoder.joblib"))
-    test_df  = pd.read_pickle(os.path.join(DATA_DIR, "test_data.pkl"))
+    scaler  = load_artifact(os.path.join(DATA_DIR, "scaler.joblib"))
+    le      = load_artifact(os.path.join(DATA_DIR, "label_encoder.joblib"))
+    test_df = pd.read_pickle(os.path.join(DATA_DIR, "test_data.pkl"))
     return lgbm, dnn, if_mod, ae_mod, ae_thresh, scaler, le, test_df
 
 try:
@@ -176,12 +185,16 @@ with st.sidebar:
     st.markdown("**S**ecure **E**dge **D**omain robust  \n**I**ntrusion **K**nowledge **A**rchitecture")
     st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
 
+    _engine_opts = (
+        ["DNN — Robust (recommended)", "LightGBM — Fast"] if dnn_model is not None
+        else ["LightGBM — Fast"]
+    )
     model_choice = st.selectbox(
         "Classification engine",
-        ["DNN — Robust (recommended)", "LightGBM — Fast"],
+        _engine_opts,
         help="DNN maintains >97% accuracy under Gaussian noise (σ=0.1); LightGBM collapses to ~14%.",
     )
-    use_dnn = model_choice.startswith("DNN")
+    use_dnn = model_choice.startswith("DNN") and dnn_model is not None
 
     st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
     st.markdown(
@@ -419,8 +432,12 @@ with tab_anomaly:
 
     with col_ae:
         st.markdown("**Autoencoder Reconstruction (FPR-budget calibrated)**")
-        recon = ae_mod.predict(sample_x.values, verbose=0)
-        mse   = float(np.mean((sample_x.values - recon) ** 2))
+        if ae_mod is None:
+            st.info("Autoencoder requires TensorFlow — not available in this environment.")
+            mse = ae_thresh  # neutral value
+        else:
+            recon = ae_mod.predict(sample_x.values, verbose=0)
+            mse   = float(np.mean((sample_x.values - recon) ** 2))
         ratio = min(mse / (ae_thresh * 2), 1.0)
 
         if mse > ae_thresh:
