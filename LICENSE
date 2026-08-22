@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2025 AbdElAziz AbdElAzeem
+Copyright (c) 2025 AbdLAzeem
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+NOTE: The numerical results, per-class reports, robustness curves, and novel
+model weights (sedika_difa_v2.keras, sedika_ae_adapted.keras,
+sedika_ae_threshold.joblib) are withheld from this repository pending official
+publication in Computers & Security, Elsevier. These assets will be released
+under the same MIT License upon acceptance of the research paper.
+
+If you use this codebase in your research, please cite the corresponding paper
+(see README.md for citation details).
