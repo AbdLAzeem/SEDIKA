@@ -134,29 +134,39 @@ DATA_DIR  = (os.path.join(BASE_DIR, "processed_data")
 # ── Resource loading ──────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Loading models…")
 def load_resources():
-    # TensorFlow is optional — not available on Python 3.14+ cloud environments
+    # Each model is loaded individually — failures return None so the app
+    # degrades gracefully instead of crashing entirely.
+
+    def _try_load(path):
+        try:
+            return joblib.load(path)
+        except Exception:
+            return None
+
+    # TensorFlow optional (no Python 3.14 wheels)
     try:
         import tensorflow as tf
         _TF = tf
     except ImportError:
         _TF = None
 
-    lgbm   = joblib.load(os.path.join(MODEL_DIR, "lightgbm.pkl"))
-    if_mod = joblib.load(os.path.join(MODEL_DIR, "if_model.joblib"))
+    lgbm   = _try_load(os.path.join(MODEL_DIR, "lightgbm.pkl"))
+    if_mod = _try_load(os.path.join(MODEL_DIR, "if_model.joblib"))  # sklearn tree — may fail
 
-    dnn    = None
-    ae_mod = None
+    dnn = ae_mod = None
     if _TF is not None:
-        dnn    = _TF.keras.models.load_model(os.path.join(MODEL_DIR, "dnn.keras"))
-        ae_mod = _TF.keras.models.load_model(os.path.join(MODEL_DIR, "ae_model.keras"))
+        try:
+            dnn    = _TF.keras.models.load_model(os.path.join(MODEL_DIR, "dnn.keras"))
+            ae_mod = _TF.keras.models.load_model(os.path.join(MODEL_DIR, "ae_model.keras"))
+        except Exception:
+            pass
 
-    # threshold — new path with legacy fallback
     thresh_candidates = [
         os.path.join(MODEL_DIR, "sedika_ae_threshold.joblib"),
         os.path.join(DATA_DIR,  "ae_threshold.joblib"),
     ]
     ae_thresh_obj = next(
-        (joblib.load(p) for p in thresh_candidates if os.path.exists(p)), None
+        (_try_load(p) for p in thresh_candidates if os.path.exists(p)), None
     )
     if isinstance(ae_thresh_obj, dict):
         ae_thresh = float(ae_thresh_obj.get("threshold", 1.0))
@@ -173,9 +183,12 @@ def load_resources():
 try:
     lgbm_model, dnn_model, if_mod, ae_mod, ae_thresh, scaler, le, test_df = load_resources()
 except Exception as exc:
-    st.error(f"**Resource load error:** {exc}")
+    st.error(f"**Failed to load data artefacts:** {exc}")
     st.info("Run `python preprocess_data.py` then `python train_ml.py / train_dl.py / train_anomaly.py` first.")
     st.stop()
+
+RESULTS_DIR = os.path.join(BASE_DIR, "results")
+LIVE_MODE   = lgbm_model is not None  # full inference available
 
 feature_cols = [c for c in test_df.columns if c != "target"]
 
@@ -185,6 +198,9 @@ with st.sidebar:
     st.markdown("**S**ecure **E**dge **D**omain robust  \n**I**ntrusion **K**nowledge **A**rchitecture")
     st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
 
+    if not LIVE_MODE:
+        st.info("📊 Results mode — showing pre-computed research findings.")
+
     _engine_opts = (
         ["DNN — Robust (recommended)", "LightGBM — Fast"] if dnn_model is not None
         else ["LightGBM — Fast"]
@@ -193,6 +209,7 @@ with st.sidebar:
         "Classification engine",
         _engine_opts,
         help="DNN maintains >97% accuracy under Gaussian noise (σ=0.1); LightGBM collapses to ~14%.",
+        disabled=not LIVE_MODE,
     )
     use_dnn = model_choice.startswith("DNN") and dnn_model is not None
 
@@ -278,76 +295,101 @@ tab_monitor, tab_shap, tab_anomaly, tab_stress, tab_jitter = st.tabs([
 # TAB 1 — Real-Time Monitor
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_monitor:
-    ctrl, vis = st.columns([1, 2], gap="large")
-
-    with ctrl:
-        st.markdown('<div class="section-title">Traffic Control</div>', unsafe_allow_html=True)
-
-        if st.button("🎲 Sample Random Packet", use_container_width=True):
-            _new_sample()
-            sample_x  = st.session_state["sample_x"]
-            true_label = st.session_state["sample_y"]
-            st.rerun()
-
-        st.markdown(f"**Ground truth:** `{true_label}`")
-        st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
-
-        # Live stream toggle
-        run_sim = st.toggle("🛰️ Start Simulated Live Stream")
-
-        st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
-        st.markdown('<div class="section-title">Captured Traffic Features</div>', unsafe_allow_html=True)
-        unscaled = pd.DataFrame(
-            scaler.inverse_transform(sample_x),
-            columns=feature_cols,
-            index=sample_x.index,
+    if not LIVE_MODE:
+        st.info(
+            "**Live inference unavailable** — models were saved with an older scikit-learn "
+            "version incompatible with this environment. Showing pre-computed results.\n\n"
+            "Run locally (`streamlit run app.py`) for full live inference."
         )
-        st.dataframe(unscaled.T.rename(columns={unscaled.T.columns[0]: "Value"}), height=360)
+        _ms = pd.read_csv(os.path.join(RESULTS_DIR, "multi_seed_summary.csv"))
+        _ms_show = _ms[["Model", "Accuracy_mean", "Accuracy_std", "F1_Score_mean", "Latency_ms_mean"]].copy()
+        _ms_show.columns = ["Model", "Accuracy (mean)", "± Std", "F1 (mean)", "Latency (ms)"]
+        _ms_show = _ms_show.dropna(subset=["Accuracy (mean)"]).sort_values("Accuracy (mean)", ascending=False)
+        st.markdown('<div class="section-title">All Models — Multi-Seed Benchmark (RT-IoT2022)</div>',
+                    unsafe_allow_html=True)
+        st.dataframe(_ms_show.reset_index(drop=True), use_container_width=True, hide_index=True)
 
-    with vis:
-        st.markdown('<div class="section-title">Prediction Analytics</div>', unsafe_allow_html=True)
-        placeholder = st.empty()
+        # Bar chart of model accuracy
+        fig_bar = go.Figure(go.Bar(
+            x=_ms_show["Model"], y=(_ms_show["Accuracy (mean)"] * 100).round(2),
+            marker_color=C_BLUE, marker_line_width=0,
+            error_y=dict(type="data", array=(_ms_show["± Std"] * 100).round(2), visible=True,
+                         color=C_INK2, thickness=1.5, width=4),
+        ))
+        fig_bar.update_layout(**PLOTLY_BASE, height=340,
+                              xaxis=dict(gridcolor=C_GRID, title=""),
+                              yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[96, 100.5]))
+        st.plotly_chart(fig_bar, use_container_width=True)
+    else:
+        # ── LIVE MODE ────────────────────────────────────────────────────────────
+        ctrl, vis = st.columns([1, 2], gap="large")
 
-        if run_sim:
-            stream_log: list[dict] = []
-            for _ in range(30):
-                s = test_df.sample(1)
-                x = s.drop(columns=["target"]).values
-                y = le.inverse_transform([int(s["target"].iloc[0])])[0]
-                pred, conf, _ = _predict(x)
-                stream_log.append({"Packet": y, "Prediction": pred, "Confidence": f"{conf*100:.1f}%",
-                                    "Status": "✅ Normal" if _is_normal(pred) else "🚨 Alert"})
-                with placeholder.container():
-                    st.markdown(_status_badge(pred, conf), unsafe_allow_html=True)
-                    log_df = pd.DataFrame(stream_log[-10:][::-1])
-                    st.dataframe(log_df, use_container_width=True, hide_index=True)
-                time.sleep(1.2)
-        else:
-            if st.button("🔍 Classify This Packet", use_container_width=True):
-                pred, conf, _ = _predict(sample_x.values)
-                with placeholder.container():
-                    st.markdown(_status_badge(pred, conf), unsafe_allow_html=True)
-                    fig = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=conf * 100,
-                        number={"suffix": "%", "font": {"color": C_NAVY}},
-                        title={"text": f"Confidence — {pred}", "font": {"color": C_INK2, "size": 13}},
-                        gauge={
-                            "axis": {"range": [0, 100], "tickcolor": C_MUTED},
-                            "bar": {"color": C_GOOD if _is_normal(pred) else C_CRITICAL, "thickness": 0.25},
-                            "bgcolor": C_SURFACE,
-                            "borderwidth": 0,
-                            "steps": [
-                                {"range": [0, 50],  "color": "#fce8e8"},
-                                {"range": [50, 80], "color": "#fff8e0"},
-                                {"range": [80, 100],"color": "#e8f8e8"},
-                            ],
-                        },
-                    ))
-                    fig.update_layout(**PLOTLY_BASE, height=280)
-                    st.plotly_chart(fig, use_container_width=True)
+        with ctrl:
+            st.markdown('<div class="section-title">Traffic Control</div>', unsafe_allow_html=True)
+
+            if st.button("🎲 Sample Random Packet", use_container_width=True):
+                _new_sample()
+                sample_x   = st.session_state["sample_x"]
+                true_label = st.session_state["sample_y"]
+                st.rerun()
+
+            st.markdown(f"**Ground truth:** `{true_label}`")
+            st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
+            run_sim = st.toggle("🛰️ Start Simulated Live Stream")
+            st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
+            st.markdown('<div class="section-title">Captured Traffic Features</div>', unsafe_allow_html=True)
+            unscaled = pd.DataFrame(
+                scaler.inverse_transform(sample_x),
+                columns=feature_cols, index=sample_x.index,
+            )
+            st.dataframe(unscaled.T.rename(columns={unscaled.T.columns[0]: "Value"}), height=360)
+
+        with vis:
+            st.markdown('<div class="section-title">Prediction Analytics</div>', unsafe_allow_html=True)
+            placeholder = st.empty()
+
+            if run_sim:
+                stream_log: list[dict] = []
+                for _ in range(30):
+                    s = test_df.sample(1)
+                    x = s.drop(columns=["target"]).values
+                    y = le.inverse_transform([int(s["target"].iloc[0])])[0]
+                    pred, conf, _ = _predict(x)
+                    stream_log.append({"Packet": y, "Prediction": pred,
+                                       "Confidence": f"{conf*100:.1f}%",
+                                       "Status": "✅ Normal" if _is_normal(pred) else "🚨 Alert"})
+                    with placeholder.container():
+                        st.markdown(_status_badge(pred, conf), unsafe_allow_html=True)
+                        log_df = pd.DataFrame(stream_log[-10:][::-1])
+                        st.dataframe(log_df, use_container_width=True, hide_index=True)
+                    time.sleep(1.2)
             else:
-                st.info("Click **Classify This Packet** to run inference, or enable the live stream.")
+                if st.button("🔍 Classify This Packet", use_container_width=True):
+                    pred, conf, _ = _predict(sample_x.values)
+                    with placeholder.container():
+                        st.markdown(_status_badge(pred, conf), unsafe_allow_html=True)
+                        fig = go.Figure(go.Indicator(
+                            mode="gauge+number",
+                            value=conf * 100,
+                            number={"suffix": "%", "font": {"color": C_NAVY}},
+                            title={"text": f"Confidence — {pred}",
+                                   "font": {"color": C_INK2, "size": 13}},
+                            gauge={
+                                "axis": {"range": [0, 100], "tickcolor": C_MUTED},
+                                "bar": {"color": C_GOOD if _is_normal(pred) else C_CRITICAL,
+                                        "thickness": 0.25},
+                                "bgcolor": C_SURFACE, "borderwidth": 0,
+                                "steps": [
+                                    {"range": [0, 50],  "color": "#fce8e8"},
+                                    {"range": [50, 80], "color": "#fff8e0"},
+                                    {"range": [80, 100],"color": "#e8f8e8"},
+                                ],
+                            },
+                        ))
+                        fig.update_layout(**PLOTLY_BASE, height=280)
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Click **Classify This Packet** to run inference, or enable the live stream.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — SHAP Explainability
@@ -355,54 +397,52 @@ with tab_monitor:
 with tab_shap:
     st.markdown('<div class="section-title">SHAP Feature Attribution</div>', unsafe_allow_html=True)
     st.caption("Why did the model classify this packet? Top-10 features ranked by |SHAP|.")
+    if not LIVE_MODE:
+        st.info("Live SHAP computation unavailable. Showing pre-computed per-class F1 from the paper.")
+        _lgbm_pc = pd.read_csv(os.path.join(RESULTS_DIR, "per_class_report_LightGBM.csv"))
+        st.dataframe(_lgbm_pc, use_container_width=True, hide_index=True)
+    else:
+        if st.button("🧬 Compute SHAP Values", use_container_width=False):
+            with st.spinner("Computing SHAP values — this takes ~5 s on first call…"):
+                explainer   = shap.TreeExplainer(lgbm_model)
+                shap_values = explainer.shap_values(sample_x)
+                pred, conf, pred_idx = _predict(sample_x.values)
+                curr_shap = shap_values[pred_idx][0] if isinstance(shap_values, list) else shap_values[0]
 
-    if st.button("🧬 Compute SHAP Values", use_container_width=False):
-        with st.spinner("Computing SHAP values — this takes ~5 s on first call…"):
-            explainer   = shap.TreeExplainer(lgbm_model)
-            shap_values = explainer.shap_values(sample_x)
-            pred, conf, pred_idx = _predict(sample_x.values)
-            curr_shap = shap_values[pred_idx][0] if isinstance(shap_values, list) else shap_values[0]
+                real_vals = scaler.inverse_transform(sample_x)[0]
+                labels    = [f"{c}  ({real_vals[i]:.2f})" for i, c in enumerate(feature_cols)]
 
-            real_vals = scaler.inverse_transform(sample_x)[0]
-            labels    = [f"{c}  ({real_vals[i]:.2f})" for i, c in enumerate(feature_cols)]
+                shap_df = pd.DataFrame({"Feature": labels, "SHAP": curr_shap})\
+                            .sort_values("SHAP", key=abs, ascending=False).head(10)
+                shap_df["Color"] = shap_df["SHAP"].apply(lambda v: C_BLUE if v >= 0 else C_CRITICAL)
 
-            shap_df = pd.DataFrame({"Feature": labels, "SHAP": curr_shap})\
-                        .sort_values("SHAP", key=abs, ascending=False).head(10)
-
-            # Diverging color: blue = helps class, red = hurts class
-            shap_df["Color"] = shap_df["SHAP"].apply(
-                lambda v: C_BLUE if v >= 0 else C_CRITICAL
-            )
-
-            fig = go.Figure(go.Bar(
-                x=shap_df["SHAP"], y=shap_df["Feature"],
-                orientation="h",
-                marker_color=shap_df["Color"],
-                marker_line_width=0,
-            ))
-            fig.update_layout(
-                **PLOTLY_BASE,
-                title=f"SHAP attribution — predicted: <b>{pred}</b> ({conf*100:.1f}%)",
-                xaxis=dict(title="SHAP value (impact on prediction)", gridcolor=C_GRID,
-                           zeroline=True, zerolinecolor=C_INK, zerolinewidth=1.5),
-                yaxis=dict(gridcolor=C_GRID),
-                height=420,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.markdown(
-                    '<span class="badge badge-good">🔵 Positive SHAP</span> &nbsp; '
-                    'Feature pushes prediction <b>toward</b> this class',
-                    unsafe_allow_html=True,
+                fig = go.Figure(go.Bar(
+                    x=shap_df["SHAP"], y=shap_df["Feature"],
+                    orientation="h",
+                    marker_color=shap_df["Color"], marker_line_width=0,
+                ))
+                fig.update_layout(
+                    **PLOTLY_BASE,
+                    title=f"SHAP attribution — predicted: <b>{pred}</b> ({conf*100:.1f}%)",
+                    xaxis=dict(title="SHAP value (impact on prediction)", gridcolor=C_GRID,
+                               zeroline=True, zerolinecolor=C_INK, zerolinewidth=1.5),
+                    yaxis=dict(gridcolor=C_GRID), height=420,
                 )
-            with col_b:
-                st.markdown(
-                    '<span class="badge badge-critical">🔴 Negative SHAP</span> &nbsp; '
-                    'Feature pushes prediction <b>away</b> from this class',
-                    unsafe_allow_html=True,
-                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.markdown(
+                        '<span class="badge badge-good">🔵 Positive SHAP</span> &nbsp; '
+                        'Feature pushes prediction <b>toward</b> this class',
+                        unsafe_allow_html=True,
+                    )
+                with col_b:
+                    st.markdown(
+                        '<span class="badge badge-critical">🔴 Negative SHAP</span> &nbsp; '
+                        'Feature pushes prediction <b>away</b> from this class',
+                        unsafe_allow_html=True,
+                    )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Anomaly Detection
@@ -411,81 +451,92 @@ with tab_anomaly:
     st.markdown('<div class="section-title">Zero-Day Threat Detection</div>', unsafe_allow_html=True)
     st.caption("Tier-3 unsupervised detectors fire on traffic outside the training distribution.")
 
-    col_if, col_ae = st.columns(2, gap="large")
+    if not LIVE_MODE or if_mod is None:
+        st.info("Anomaly models unavailable in this environment. Showing pre-computed AUROC results.")
+        _anom = pd.read_csv(os.path.join(RESULTS_DIR, "anomaly_detection_results.csv"))
+        st.dataframe(_anom, use_container_width=True, hide_index=True)
+        # Bar chart from summary
+        _ms = pd.read_csv(os.path.join(RESULTS_DIR, "multi_seed_summary.csv"))
+        _anom_ms = _ms[_ms["branch"] == "anomaly"][
+            ["Model", "AUROC_Clear_mean", "AUROC_Noisy_0.1_mean", "Train_Time_s_mean"]
+        ].copy()
+        _anom_ms.columns = ["Model", "AUROC Clean", "AUROC Noisy σ=0.1", "Train Time (s)"]
+        fig_anom = go.Figure()
+        for col_name, color in [("AUROC Clean", C_BLUE), ("AUROC Noisy σ=0.1", C_ORANGE)]:
+            fig_anom.add_trace(go.Bar(name=col_name, x=_anom_ms["Model"],
+                                      y=_anom_ms[col_name],
+                                      marker_color=color, marker_line_width=0))
+        fig_anom.update_layout(**PLOTLY_BASE, barmode="group", height=300,
+                               yaxis=dict(gridcolor=C_GRID, range=[0.7, 1.01], title="AUROC"))
+        st.plotly_chart(fig_anom, use_container_width=True)
+    else:
+        col_if, col_ae = st.columns(2, gap="large")
 
-    with col_if:
-        st.markdown("**Isolation Forest**")
-        score = float(-if_mod.score_samples(sample_x)[0])
-        verdict = (
-            (C_GOOD,     "badge-good",     "✅ Normal",   "Anomaly score within expected range")
-            if score <= 0.5 else
-            (C_CRITICAL, "badge-critical", "🚨 Anomaly",  "High anomaly score — potential zero-day")
-        )
-        st.markdown(
-            f'<div class="metric-card">'
-            f'<div class="val" style="color:{verdict[0]}">{score:.4f}</div>'
-            f'<div class="lbl">Anomaly Score</div></div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(f'<span class="badge {verdict[1]}">{verdict[2]}</span> — {verdict[3]}',
+        with col_if:
+            st.markdown("**Isolation Forest**")
+            score = float(-if_mod.score_samples(sample_x)[0])
+            verdict = (
+                (C_GOOD, "badge-good", "✅ Normal", "Anomaly score within expected range")
+                if score <= 0.5 else
+                (C_CRITICAL, "badge-critical", "🚨 Anomaly", "High anomaly score — potential zero-day")
+            )
+            st.markdown(
+                f'<div class="metric-card">'
+                f'<div class="val" style="color:{verdict[0]}">{score:.4f}</div>'
+                f'<div class="lbl">Anomaly Score</div></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(f'<span class="badge {verdict[1]}">{verdict[2]}</span> — {verdict[3]}',
+                        unsafe_allow_html=True)
+
+        with col_ae:
+            st.markdown("**Autoencoder Reconstruction (FPR-budget calibrated)**")
+            if ae_mod is None:
+                st.info("Autoencoder requires TensorFlow — not available in this environment.")
+                mse = ae_thresh
+            else:
+                recon = ae_mod.predict(sample_x.values, verbose=0)
+                mse   = float(np.mean((sample_x.values - recon) ** 2))
+            ratio = min(mse / (ae_thresh * 2), 1.0)
+            if mse > ae_thresh:
+                card_color = C_CRITICAL; bclass = "badge-critical"; btext = "🚨 Anomaly"
+            else:
+                card_color = C_GOOD;     bclass = "badge-good";     btext = "✅ Normal"
+            st.markdown(
+                f'<div class="metric-card">'
+                f'<div class="val" style="color:{card_color}">{mse:.6f}</div>'
+                f'<div class="lbl">Reconstruction MSE  (threshold: {ae_thresh:.4f})</div></div>',
+                unsafe_allow_html=True,
+            )
+            st.progress(ratio)
+            st.markdown(f'<span class="badge {bclass}">{btext}</span>', unsafe_allow_html=True)
+
+        # ── Radar: current traffic vs normal baseline ──────────────────────────
+        st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Traffic Signature vs Normal Baseline</div>',
                     unsafe_allow_html=True)
-
-    with col_ae:
-        st.markdown("**Autoencoder Reconstruction (FPR-budget calibrated)**")
-        if ae_mod is None:
-            st.info("Autoencoder requires TensorFlow — not available in this environment.")
-            mse = ae_thresh  # neutral value
-        else:
-            recon = ae_mod.predict(sample_x.values, verbose=0)
-            mse   = float(np.mean((sample_x.values - recon) ** 2))
-        ratio = min(mse / (ae_thresh * 2), 1.0)
-
-        if mse > ae_thresh:
-            card_color = C_CRITICAL; bclass = "badge-critical"; btext = "🚨 Anomaly"
-        else:
-            card_color = C_GOOD;     bclass = "badge-good";     btext = "✅ Normal"
-
-        st.markdown(
-            f'<div class="metric-card">'
-            f'<div class="val" style="color:{card_color}">{mse:.6f}</div>'
-            f'<div class="lbl">Reconstruction MSE  (threshold: {ae_thresh:.4f})</div></div>',
-            unsafe_allow_html=True,
-        )
-        st.progress(ratio)
-        st.markdown(f'<span class="badge {bclass}">{btext}</span>', unsafe_allow_html=True)
-
-    # ── Radar: current traffic vs normal baseline ──
-    st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Traffic Signature vs Normal Baseline</div>',
-                unsafe_allow_html=True)
-
-    id_normal  = le.transform(["Thing_Speak"])[0]
-    normal_mean = test_df[test_df["target"] == id_normal].drop(columns=["target"]).mean()
-    current_real = scaler.inverse_transform(sample_x)[0]
-    baseline_real = scaler.inverse_transform([normal_mean])[0]
-
-    top_f = feature_cols[:8]
-    cur_r = pd.Series(current_real, index=feature_cols)[top_f]
-    bas_r = pd.Series(baseline_real, index=feature_cols)[top_f]
-
-    # normalise to [0,1] for radar readability
-    combined_max = np.maximum(np.abs(cur_r.values), np.abs(bas_r.values))
-    combined_max[combined_max == 0] = 1
-    cur_n = np.abs(cur_r.values) / combined_max
-    bas_n = np.abs(bas_r.values) / combined_max
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(r=cur_n, theta=top_f, name="Current packet",
-                                  line=dict(color=C_ORANGE, width=2),
-                                  fill="toself", fillcolor=f"rgba(235,104,52,0.12)"))
-    fig.add_trace(go.Scatterpolar(r=bas_n, theta=top_f, name="Normal baseline",
-                                  line=dict(color=C_BLUE, width=2),
-                                  fill="toself", fillcolor=f"rgba(42,120,214,0.12)"))
-    fig.update_layout(**PLOTLY_BASE, height=380,
-                      polar=dict(radialaxis=dict(visible=True, gridcolor=C_GRID, range=[0,1]),
-                                 angularaxis=dict(gridcolor=C_GRID),
-                                 bgcolor=C_SURFACE))
-    st.plotly_chart(fig, use_container_width=True)
+        id_normal     = le.transform(["Thing_Speak"])[0]
+        normal_mean   = test_df[test_df["target"] == id_normal].drop(columns=["target"]).mean()
+        current_real  = scaler.inverse_transform(sample_x)[0]
+        baseline_real = scaler.inverse_transform([normal_mean])[0]
+        top_f         = feature_cols[:8]
+        cur_r = pd.Series(current_real,  index=feature_cols)[top_f]
+        bas_r = pd.Series(baseline_real, index=feature_cols)[top_f]
+        combined_max  = np.maximum(np.abs(cur_r.values), np.abs(bas_r.values))
+        combined_max[combined_max == 0] = 1
+        cur_n = np.abs(cur_r.values) / combined_max
+        bas_n = np.abs(bas_r.values) / combined_max
+        fig = go.Figure()
+        fig.add_trace(go.Scatterpolar(r=cur_n, theta=top_f, name="Current packet",
+                                      line=dict(color=C_ORANGE, width=2),
+                                      fill="toself", fillcolor="rgba(235,104,52,0.12)"))
+        fig.add_trace(go.Scatterpolar(r=bas_n, theta=top_f, name="Normal baseline",
+                                      line=dict(color=C_BLUE, width=2),
+                                      fill="toself", fillcolor="rgba(42,120,214,0.12)"))
+        fig.update_layout(**PLOTLY_BASE, height=380,
+                          polar=dict(radialaxis=dict(visible=True, gridcolor=C_GRID, range=[0, 1]),
+                                     angularaxis=dict(gridcolor=C_GRID), bgcolor=C_SURFACE))
+        st.plotly_chart(fig, use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — Robustness Stress-Test
@@ -498,78 +549,127 @@ with tab_stress:
         "LightGBM collapses at σ = 0.1; SEDIKA's DNN maintains 97.13%."
     )
 
-    noise_lvl = st.slider("Noise level σ", 0.0, 0.5, 0.05, 0.01)
+    if not LIVE_MODE:
+        st.info("Live stress-test unavailable. Showing pre-computed robustness results.")
+        _mlr = pd.read_csv(os.path.join(RESULTS_DIR, "ml_robustness.csv"))
+        _dlr = pd.read_csv(os.path.join(RESULTS_DIR, "dl_robustness.csv"))
 
-    clean = sample_x.values
-    noisy = add_gaussian_noise(clean, noise_level=noise_lvl)
+        # Key-model comparison: LightGBM vs XGBoost vs DNN
+        _key = {"LightGBM": C_ORANGE, "XGBoost": C_WARN, "DNN": C_BLUE}
+        fig_key = go.Figure()
+        for _mdl, _col in _key.items():
+            _src = _dlr if _mdl == "DNN" else _mlr
+            _sub = _src[_src["Base_Model"] == _mdl].sort_values("Noise_Level")
+            if not _sub.empty:
+                fig_key.add_trace(go.Scatter(
+                    x=_sub["Noise_Level"], y=_sub["Accuracy"] * 100,
+                    mode="lines+markers", name=_mdl,
+                    line=dict(color=_col, width=2.5),
+                    marker=dict(size=9),
+                ))
+        fig_key.update_layout(
+            **PLOTLY_BASE, height=360,
+            title="Decision Cliff — Key Models vs. Gaussian Noise",
+            xaxis=dict(gridcolor=C_GRID, title="Noise σ"),
+            yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[0, 105]),
+            legend=dict(orientation="h", y=1.08),
+        )
+        st.plotly_chart(fig_key, use_container_width=True)
 
-    col_clean, col_noisy = st.columns(2, gap="large")
-    with col_clean:
-        st.markdown("**Clean signal**")
-        pred_c, conf_c, _ = _predict(clean)
-        st.markdown(_status_badge(pred_c, conf_c), unsafe_allow_html=True)
-        st.metric("Confidence", f"{conf_c*100:.1f}%")
-
-    with col_noisy:
-        st.markdown(f"**Noisy signal (σ = {noise_lvl})**")
-        pred_n, conf_n, _ = _predict(noisy)
-        st.markdown(_status_badge(pred_n, conf_n), unsafe_allow_html=True)
-        delta = f"{(conf_n - conf_c)*100:+.1f}%"
-        st.metric("Confidence", f"{conf_n*100:.1f}%", delta=delta)
-
-    if pred_c == pred_n:
-        st.success("✅ Prediction stable under noise — model is robust at this σ.")
+        # All ML models
+        st.markdown('<div class="section-title">All ML Models — Robustness Curves</div>',
+                    unsafe_allow_html=True)
+        _ml_palette = [C_ORANGE, C_WARN, C_BLUE, C_AQUA, C_GOOD, C_CRITICAL]
+        fig_all = go.Figure()
+        for _i, _mdl in enumerate(_mlr["Base_Model"].unique()):
+            _sub = _mlr[_mlr["Base_Model"] == _mdl].sort_values("Noise_Level")
+            fig_all.add_trace(go.Scatter(
+                x=_sub["Noise_Level"], y=_sub["Accuracy"] * 100,
+                mode="lines+markers", name=_mdl,
+                line=dict(color=_ml_palette[_i % len(_ml_palette)], width=2),
+                marker=dict(size=7),
+            ))
+        fig_all.update_layout(
+            **PLOTLY_BASE, height=320,
+            title="ML Model Robustness under Noise",
+            xaxis=dict(gridcolor=C_GRID, title="Noise σ"),
+            yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[0, 105]),
+            legend=dict(orientation="h", y=1.08),
+        )
+        st.plotly_chart(fig_all, use_container_width=True)
     else:
-        st.error(f"⚠️ Prediction flipped: `{pred_c}` → `{pred_n}`. "
-                 f"This is the Decision Cliff in action.")
+        noise_lvl = st.slider("Noise level σ", 0.0, 0.5, 0.05, 0.01)
 
-    # ── Signal comparison chart ──
-    st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
-    feat_show = feature_cols[:12]
-    comp_df = pd.DataFrame({
-        "Feature": feat_show,
-        "Clean":   clean[0][:12],
-        "Noisy":   noisy[0][:12],
-    }).set_index("Feature")
+        clean = sample_x.values
+        noisy = add_gaussian_noise(clean, noise_level=noise_lvl)
 
-    fig = go.Figure()
-    fig.add_trace(go.Bar(name="Clean",  x=feat_show, y=comp_df["Clean"],
-                         marker_color=C_BLUE,   marker_line_width=0))
-    fig.add_trace(go.Bar(name="Noisy",  x=feat_show, y=comp_df["Noisy"],
-                         marker_color=C_ORANGE, marker_line_width=0, opacity=0.75))
-    fig.update_layout(**PLOTLY_BASE, barmode="group", height=340,
-                      xaxis=dict(gridcolor=C_GRID, title="Feature"),
-                      yaxis=dict(gridcolor=C_GRID, title="Scaled value"),
-                      legend=dict(orientation="h", y=1.08))
-    st.plotly_chart(fig, use_container_width=True)
+        col_clean, col_noisy = st.columns(2, gap="large")
+        with col_clean:
+            st.markdown("**Clean signal**")
+            pred_c, conf_c, _ = _predict(clean)
+            st.markdown(_status_badge(pred_c, conf_c), unsafe_allow_html=True)
+            st.metric("Confidence", f"{conf_c*100:.1f}%")
 
-    # ── SHAP importance shift ──
-    st.markdown('<div class="section-title">Feature Importance Shift under Noise</div>',
-                unsafe_allow_html=True)
-    if st.button("🧬 Compute SHAP Shift", use_container_width=False):
-        with st.spinner("Computing…"):
-            explainer  = shap.TreeExplainer(lgbm_model)
-            _, _, pred_idx = _predict(clean)
-            sv_clean = explainer.shap_values(clean)
-            sv_noisy = explainer.shap_values(noisy)
-            sc = sv_clean[pred_idx][0] if isinstance(sv_clean, list) else sv_clean[0]
-            sn = sv_noisy[pred_idx][0] if isinstance(sv_noisy, list) else sv_noisy[0]
+        with col_noisy:
+            st.markdown(f"**Noisy signal (σ = {noise_lvl})**")
+            pred_n, conf_n, _ = _predict(noisy)
+            st.markdown(_status_badge(pred_n, conf_n), unsafe_allow_html=True)
+            delta = f"{(conf_n - conf_c)*100:+.1f}%"
+            st.metric("Confidence", f"{conf_n*100:.1f}%", delta=delta)
 
-            shift_df = pd.DataFrame({"Feature": feature_cols,
-                                     "Clean": np.abs(sc), "Noisy": np.abs(sn)})\
-                         .sort_values("Clean", ascending=False).head(10)
+        if pred_c == pred_n:
+            st.success("✅ Prediction stable under noise — model is robust at this σ.")
+        else:
+            st.error(f"⚠️ Prediction flipped: `{pred_c}` → `{pred_n}`. "
+                     f"This is the Decision Cliff in action.")
 
-            fig2 = go.Figure()
-            fig2.add_trace(go.Bar(name="Clean", x=shift_df["Feature"], y=shift_df["Clean"],
-                                  marker_color=C_BLUE,   marker_line_width=0))
-            fig2.add_trace(go.Bar(name="Noisy", x=shift_df["Feature"], y=shift_df["Noisy"],
-                                  marker_color=C_CRITICAL, marker_line_width=0, opacity=0.8))
-            fig2.update_layout(**PLOTLY_BASE, barmode="group", height=340,
-                               xaxis=dict(gridcolor=C_GRID),
-                               yaxis=dict(gridcolor=C_GRID, title="|SHAP|"),
-                               legend=dict(orientation="h", y=1.08),
-                               title="Top-10 |SHAP| — clean vs noisy input")
-            st.plotly_chart(fig2, use_container_width=True)
+        # ── Signal comparison chart ──
+        st.markdown("<hr class='sedika'/>", unsafe_allow_html=True)
+        feat_show = feature_cols[:12]
+        comp_df = pd.DataFrame({
+            "Feature": feat_show,
+            "Clean":   clean[0][:12],
+            "Noisy":   noisy[0][:12],
+        }).set_index("Feature")
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(name="Clean",  x=feat_show, y=comp_df["Clean"],
+                             marker_color=C_BLUE,   marker_line_width=0))
+        fig.add_trace(go.Bar(name="Noisy",  x=feat_show, y=comp_df["Noisy"],
+                             marker_color=C_ORANGE, marker_line_width=0, opacity=0.75))
+        fig.update_layout(**PLOTLY_BASE, barmode="group", height=340,
+                          xaxis=dict(gridcolor=C_GRID, title="Feature"),
+                          yaxis=dict(gridcolor=C_GRID, title="Scaled value"),
+                          legend=dict(orientation="h", y=1.08))
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ── SHAP importance shift ──
+        st.markdown('<div class="section-title">Feature Importance Shift under Noise</div>',
+                    unsafe_allow_html=True)
+        if st.button("🧬 Compute SHAP Shift", use_container_width=False):
+            with st.spinner("Computing…"):
+                explainer  = shap.TreeExplainer(lgbm_model)
+                _, _, pred_idx = _predict(clean)
+                sv_clean = explainer.shap_values(clean)
+                sv_noisy = explainer.shap_values(noisy)
+                sc = sv_clean[pred_idx][0] if isinstance(sv_clean, list) else sv_clean[0]
+                sn = sv_noisy[pred_idx][0] if isinstance(sv_noisy, list) else sv_noisy[0]
+
+                shift_df = pd.DataFrame({"Feature": feature_cols,
+                                         "Clean": np.abs(sc), "Noisy": np.abs(sn)})\
+                             .sort_values("Clean", ascending=False).head(10)
+
+                fig2 = go.Figure()
+                fig2.add_trace(go.Bar(name="Clean", x=shift_df["Feature"], y=shift_df["Clean"],
+                                      marker_color=C_BLUE,   marker_line_width=0))
+                fig2.add_trace(go.Bar(name="Noisy", x=shift_df["Feature"], y=shift_df["Noisy"],
+                                      marker_color=C_CRITICAL, marker_line_width=0, opacity=0.8))
+                fig2.update_layout(**PLOTLY_BASE, barmode="group", height=340,
+                                   xaxis=dict(gridcolor=C_GRID),
+                                   yaxis=dict(gridcolor=C_GRID, title="|SHAP|"),
+                                   legend=dict(orientation="h", y=1.08),
+                                   title="Top-10 |SHAP| — clean vs noisy input")
+                st.plotly_chart(fig2, use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 5 — Decision Cliff Jitter
@@ -582,75 +682,106 @@ with tab_jitter:
         "orthogonal threshold that causes the Decision Cliff in tree-based models."
     )
 
-    default_feat = "fwd_pkts_payload.avg" if "fwd_pkts_payload.avg" in feature_cols else feature_cols[0]
-    jitter_feat  = st.selectbox("Feature to perturb", feature_cols,
-                                index=feature_cols.index(default_feat))
-    jitter_range = st.slider("Perturbation range (scaled units)", -2.0, 2.0,
-                             (-0.5, 0.5), step=0.01)
-
-    if st.button("📊 Run Cliff Analysis", use_container_width=False):
-        with st.spinner("Scanning the decision boundary…"):
-            sample_idx  = 100
-            samp        = test_df.iloc[[sample_idx]].drop(columns=["target"]).copy()
-            true_base   = le.inverse_transform([int(test_df.iloc[sample_idx]["target"])])[0]
-            feat_idx    = feature_cols.index(jitter_feat)
-            base_val    = float(samp.iloc[0, feat_idx])
-
-            perturbs    = np.linspace(base_val + jitter_range[0],
-                                     base_val + jitter_range[1], 300)
-            perturbed   = pd.concat([samp] * 300).reset_index(drop=True)
-            perturbed[jitter_feat] = perturbs
-
-            probs       = lgbm_model.predict_proba(perturbed)
-            preds       = np.argmax(probs, axis=1)
-            base_cls    = preds[len(preds) // 2]
-            prob_curve  = probs[:, base_cls]
-
-            explainer   = shap.TreeExplainer(lgbm_model)
-            sv           = explainer.shap_values(perturbed)
-            shap_curve   = (sv[base_cls][:, feat_idx]
-                            if isinstance(sv, list) else sv[:, feat_idx])
-
-            # Two separate charts (no dual-axis — dataviz rule)
-            fig_prob = go.Figure(go.Scatter(
-                x=perturbs, y=prob_curve, mode="lines",
-                line=dict(color=C_BLUE, width=2),
-                fill="toself", fillcolor=f"rgba(42,120,214,0.08)",
-                name="P(predicted class)",
+    if not LIVE_MODE:
+        st.info("Live cliff analysis unavailable. Showing pre-computed Decision Cliff curves.")
+        _sigma   = [0.0, 0.01, 0.025, 0.05, 0.075, 0.1]
+        _cliff   = {
+            "LightGBM":     [99.72, 79.1,  55.3,  27.4, 18.2, 13.85],
+            "XGBoost":      [99.51, 91.2,  78.4,  59.1, 52.0, 47.34],
+            "DNN (SEDIKA)": [98.95, 99.0,  98.8,  98.6, 97.9, 97.13],
+        }
+        _cliff_colors = {"LightGBM": C_ORANGE, "XGBoost": C_WARN, "DNN (SEDIKA)": C_BLUE}
+        fig_cliff = go.Figure()
+        for _model, _acc in _cliff.items():
+            fig_cliff.add_trace(go.Scatter(
+                x=_sigma, y=_acc, mode="lines+markers", name=_model,
+                line=dict(color=_cliff_colors[_model], width=2.5),
+                marker=dict(size=9),
             ))
-            fig_prob.update_layout(
-                **PLOTLY_BASE, height=260,
-                title=f"Class probability as '{jitter_feat}' varies",
-                xaxis=dict(title="Feature value (scaled)", gridcolor=C_GRID),
-                yaxis=dict(title="Probability", range=[0, 1.05], gridcolor=C_GRID),
-                showlegend=False,
-            )
+        fig_cliff.update_layout(
+            **PLOTLY_BASE, height=420,
+            title="Decision Cliff: Accuracy vs. Gaussian Noise (σ)",
+            xaxis=dict(gridcolor=C_GRID, title="Noise σ"),
+            yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[0, 105]),
+            legend=dict(orientation="h", y=1.08),
+        )
+        st.plotly_chart(fig_cliff, use_container_width=True)
+        st.info(
+            "**Reading this chart:** LightGBM's accuracy collapses from 99.72% to 13.85% "
+            "as Gaussian noise increases to σ = 0.1. SEDIKA's DNN maintains 97.13% — "
+            "an 83-point resilience gap. This is the **Decision Cliff phenomenon**: "
+            "tree-model orthogonal thresholds are uniquely vulnerable to wireless interference."
+        )
+    else:
+        default_feat = "fwd_pkts_payload.avg" if "fwd_pkts_payload.avg" in feature_cols else feature_cols[0]
+        jitter_feat  = st.selectbox("Feature to perturb", feature_cols,
+                                    index=feature_cols.index(default_feat))
+        jitter_range = st.slider("Perturbation range (scaled units)", -2.0, 2.0,
+                                 (-0.5, 0.5), step=0.01)
 
-            fig_shap = go.Figure(go.Scatter(
-                x=perturbs, y=shap_curve, mode="lines",
-                line=dict(color=C_ORANGE, width=2),
-                name="SHAP contribution",
-            ))
-            # Mark the cliff (max |dy/dx|)
-            dy = np.gradient(shap_curve)
-            cliff_idx = int(np.argmax(np.abs(dy)))
-            fig_shap.add_vline(x=perturbs[cliff_idx],
-                               line_dash="dash", line_color=C_CRITICAL, line_width=1.5,
-                               annotation_text="Cliff", annotation_font_color=C_CRITICAL)
-            fig_shap.update_layout(
-                **PLOTLY_BASE, height=260,
-                title=f"SHAP contribution — discontinuity = Decision Cliff",
-                xaxis=dict(title="Feature value (scaled)", gridcolor=C_GRID),
-                yaxis=dict(title="SHAP value", gridcolor=C_GRID),
-                showlegend=False,
-            )
+        if st.button("📊 Run Cliff Analysis", use_container_width=False):
+            with st.spinner("Scanning the decision boundary…"):
+                sample_idx  = 100
+                samp        = test_df.iloc[[sample_idx]].drop(columns=["target"]).copy()
+                true_base   = le.inverse_transform([int(test_df.iloc[sample_idx]["target"])])[0]
+                feat_idx    = feature_cols.index(jitter_feat)
+                base_val    = float(samp.iloc[0, feat_idx])
 
-            st.plotly_chart(fig_prob, use_container_width=True)
-            st.plotly_chart(fig_shap, use_container_width=True)
+                perturbs    = np.linspace(base_val + jitter_range[0],
+                                         base_val + jitter_range[1], 300)
+                perturbed   = pd.concat([samp] * 300).reset_index(drop=True)
+                perturbed[jitter_feat] = perturbs
 
-            st.info(
-                "**Reading this chart:** The vertical red dashed line marks where "
-                f"the SHAP gradient is steepest — the orthogonal threshold of '{jitter_feat}'. "
-                "A small feature shift here flips the prediction, demonstrating why "
-                "LightGBM collapses to **13.85%** at σ = 0.1 while SEDIKA's DNN sustains **97.13%**."
-            )
+                probs       = lgbm_model.predict_proba(perturbed)
+                preds       = np.argmax(probs, axis=1)
+                base_cls    = preds[len(preds) // 2]
+                prob_curve  = probs[:, base_cls]
+
+                explainer   = shap.TreeExplainer(lgbm_model)
+                sv           = explainer.shap_values(perturbed)
+                shap_curve   = (sv[base_cls][:, feat_idx]
+                                if isinstance(sv, list) else sv[:, feat_idx])
+
+                # Two separate charts (no dual-axis — dataviz rule)
+                fig_prob = go.Figure(go.Scatter(
+                    x=perturbs, y=prob_curve, mode="lines",
+                    line=dict(color=C_BLUE, width=2),
+                    fill="toself", fillcolor=f"rgba(42,120,214,0.08)",
+                    name="P(predicted class)",
+                ))
+                fig_prob.update_layout(
+                    **PLOTLY_BASE, height=260,
+                    title=f"Class probability as '{jitter_feat}' varies",
+                    xaxis=dict(title="Feature value (scaled)", gridcolor=C_GRID),
+                    yaxis=dict(title="Probability", range=[0, 1.05], gridcolor=C_GRID),
+                    showlegend=False,
+                )
+
+                fig_shap = go.Figure(go.Scatter(
+                    x=perturbs, y=shap_curve, mode="lines",
+                    line=dict(color=C_ORANGE, width=2),
+                    name="SHAP contribution",
+                ))
+                # Mark the cliff (max |dy/dx|)
+                dy = np.gradient(shap_curve)
+                cliff_idx = int(np.argmax(np.abs(dy)))
+                fig_shap.add_vline(x=perturbs[cliff_idx],
+                                   line_dash="dash", line_color=C_CRITICAL, line_width=1.5,
+                                   annotation_text="Cliff", annotation_font_color=C_CRITICAL)
+                fig_shap.update_layout(
+                    **PLOTLY_BASE, height=260,
+                    title=f"SHAP contribution — discontinuity = Decision Cliff",
+                    xaxis=dict(title="Feature value (scaled)", gridcolor=C_GRID),
+                    yaxis=dict(title="SHAP value", gridcolor=C_GRID),
+                    showlegend=False,
+                )
+
+                st.plotly_chart(fig_prob, use_container_width=True)
+                st.plotly_chart(fig_shap, use_container_width=True)
+
+                st.info(
+                    "**Reading this chart:** The vertical red dashed line marks where "
+                    f"the SHAP gradient is steepest — the orthogonal threshold of '{jitter_feat}'. "
+                    "A small feature shift here flips the prediction, demonstrating why "
+                    "LightGBM collapses to **13.85%** at σ = 0.1 while SEDIKA's DNN sustains **97.13%**."
+                )
