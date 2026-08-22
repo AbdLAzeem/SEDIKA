@@ -187,8 +187,17 @@ except Exception as exc:
     st.info("Run `python preprocess_data.py` then `python train_ml.py / train_dl.py / train_anomaly.py` first.")
     st.stop()
 
-RESULTS_DIR = os.path.join(BASE_DIR, "results")
-LIVE_MODE   = lgbm_model is not None  # full inference available
+RESULTS_DIR      = os.path.join(BASE_DIR, "results")
+LIVE_MODE        = lgbm_model is not None
+RESULTS_AVAILABLE = os.path.exists(os.path.join(RESULTS_DIR, "multi_seed_summary.csv"))
+
+def _pending_publication():
+    st.info(
+        "📄 **Results are withheld pending official publication.**\n\n"
+        "Full numerical results, per-class reports, and robustness curves will be "
+        "made publicly available upon acceptance of the research paper in "
+        "*Computers & Security*, Elsevier."
+    )
 
 feature_cols = [c for c in test_df.columns if c != "target"]
 
@@ -296,30 +305,32 @@ tab_monitor, tab_shap, tab_anomaly, tab_stress, tab_jitter = st.tabs([
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_monitor:
     if not LIVE_MODE:
-        st.info(
-            "**Live inference unavailable** — models were saved with an older scikit-learn "
-            "version incompatible with this environment. Showing pre-computed results.\n\n"
-            "Run locally (`streamlit run app.py`) for full live inference."
-        )
-        _ms = pd.read_csv(os.path.join(RESULTS_DIR, "multi_seed_summary.csv"))
-        _ms_show = _ms[["Model", "Accuracy_mean", "Accuracy_std", "F1_Score_mean", "Latency_ms_mean"]].copy()
-        _ms_show.columns = ["Model", "Accuracy (mean)", "± Std", "F1 (mean)", "Latency (ms)"]
-        _ms_show = _ms_show.dropna(subset=["Accuracy (mean)"]).sort_values("Accuracy (mean)", ascending=False)
-        st.markdown('<div class="section-title">All Models — Multi-Seed Benchmark (RT-IoT2022)</div>',
-                    unsafe_allow_html=True)
-        st.dataframe(_ms_show.reset_index(drop=True), use_container_width=True, hide_index=True)
+        if not RESULTS_AVAILABLE:
+            _pending_publication()
+        else:
+            st.info(
+                "**Live inference unavailable** — models were saved with an older scikit-learn "
+                "version incompatible with this environment. Showing pre-computed results.\n\n"
+                "Run locally (`streamlit run app.py`) for full live inference."
+            )
+            _ms = pd.read_csv(os.path.join(RESULTS_DIR, "multi_seed_summary.csv"))
+            _ms_show = _ms[["Model", "Accuracy_mean", "Accuracy_std", "F1_Score_mean", "Latency_ms_mean"]].copy()
+            _ms_show.columns = ["Model", "Accuracy (mean)", "± Std", "F1 (mean)", "Latency (ms)"]
+            _ms_show = _ms_show.dropna(subset=["Accuracy (mean)"]).sort_values("Accuracy (mean)", ascending=False)
+            st.markdown('<div class="section-title">All Models — Multi-Seed Benchmark (RT-IoT2022)</div>',
+                        unsafe_allow_html=True)
+            st.dataframe(_ms_show.reset_index(drop=True), use_container_width=True, hide_index=True)
 
-        # Bar chart of model accuracy
-        fig_bar = go.Figure(go.Bar(
-            x=_ms_show["Model"], y=(_ms_show["Accuracy (mean)"] * 100).round(2),
-            marker_color=C_BLUE, marker_line_width=0,
-            error_y=dict(type="data", array=(_ms_show["± Std"] * 100).round(2), visible=True,
-                         color=C_INK2, thickness=1.5, width=4),
-        ))
-        fig_bar.update_layout(**PLOTLY_BASE, height=340,
-                              xaxis=dict(gridcolor=C_GRID, title=""),
-                              yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[96, 100.5]))
-        st.plotly_chart(fig_bar, use_container_width=True)
+            fig_bar = go.Figure(go.Bar(
+                x=_ms_show["Model"], y=(_ms_show["Accuracy (mean)"] * 100).round(2),
+                marker_color=C_BLUE, marker_line_width=0,
+                error_y=dict(type="data", array=(_ms_show["± Std"] * 100).round(2), visible=True,
+                             color=C_INK2, thickness=1.5, width=4),
+            ))
+            fig_bar.update_layout(**PLOTLY_BASE, height=340,
+                                  xaxis=dict(gridcolor=C_GRID, title=""),
+                                  yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[96, 100.5]))
+            st.plotly_chart(fig_bar, use_container_width=True)
     else:
         # ── LIVE MODE ────────────────────────────────────────────────────────────
         ctrl, vis = st.columns([1, 2], gap="large")
@@ -398,9 +409,12 @@ with tab_shap:
     st.markdown('<div class="section-title">SHAP Feature Attribution</div>', unsafe_allow_html=True)
     st.caption("Why did the model classify this packet? Top-10 features ranked by |SHAP|.")
     if not LIVE_MODE:
-        st.info("Live SHAP computation unavailable. Showing pre-computed per-class F1 from the paper.")
-        _lgbm_pc = pd.read_csv(os.path.join(RESULTS_DIR, "per_class_report_LightGBM.csv"))
-        st.dataframe(_lgbm_pc, use_container_width=True, hide_index=True)
+        if not RESULTS_AVAILABLE:
+            _pending_publication()
+        else:
+            st.info("Live SHAP computation unavailable. Showing pre-computed per-class F1 from the paper.")
+            _lgbm_pc = pd.read_csv(os.path.join(RESULTS_DIR, "per_class_report_LightGBM.csv"))
+            st.dataframe(_lgbm_pc, use_container_width=True, hide_index=True)
     else:
         if st.button("🧬 Compute SHAP Values", use_container_width=False):
             with st.spinner("Computing SHAP values — this takes ~5 s on first call…"):
@@ -452,23 +466,25 @@ with tab_anomaly:
     st.caption("Tier-3 unsupervised detectors fire on traffic outside the training distribution.")
 
     if not LIVE_MODE or if_mod is None:
-        st.info("Anomaly models unavailable in this environment. Showing pre-computed AUROC results.")
-        _anom = pd.read_csv(os.path.join(RESULTS_DIR, "anomaly_detection_results.csv"))
-        st.dataframe(_anom, use_container_width=True, hide_index=True)
-        # Bar chart from summary
-        _ms = pd.read_csv(os.path.join(RESULTS_DIR, "multi_seed_summary.csv"))
-        _anom_ms = _ms[_ms["branch"] == "anomaly"][
-            ["Model", "AUROC_Clear_mean", "AUROC_Noisy_0.1_mean", "Train_Time_s_mean"]
-        ].copy()
-        _anom_ms.columns = ["Model", "AUROC Clean", "AUROC Noisy σ=0.1", "Train Time (s)"]
-        fig_anom = go.Figure()
-        for col_name, color in [("AUROC Clean", C_BLUE), ("AUROC Noisy σ=0.1", C_ORANGE)]:
-            fig_anom.add_trace(go.Bar(name=col_name, x=_anom_ms["Model"],
-                                      y=_anom_ms[col_name],
-                                      marker_color=color, marker_line_width=0))
-        fig_anom.update_layout(**PLOTLY_BASE, barmode="group", height=300,
-                               yaxis=dict(gridcolor=C_GRID, range=[0.7, 1.01], title="AUROC"))
-        st.plotly_chart(fig_anom, use_container_width=True)
+        if not RESULTS_AVAILABLE:
+            _pending_publication()
+        else:
+            st.info("Anomaly models unavailable in this environment. Showing pre-computed AUROC results.")
+            _anom = pd.read_csv(os.path.join(RESULTS_DIR, "anomaly_detection_results.csv"))
+            st.dataframe(_anom, use_container_width=True, hide_index=True)
+            _ms = pd.read_csv(os.path.join(RESULTS_DIR, "multi_seed_summary.csv"))
+            _anom_ms = _ms[_ms["branch"] == "anomaly"][
+                ["Model", "AUROC_Clear_mean", "AUROC_Noisy_0.1_mean", "Train_Time_s_mean"]
+            ].copy()
+            _anom_ms.columns = ["Model", "AUROC Clean", "AUROC Noisy σ=0.1", "Train Time (s)"]
+            fig_anom = go.Figure()
+            for col_name, color in [("AUROC Clean", C_BLUE), ("AUROC Noisy σ=0.1", C_ORANGE)]:
+                fig_anom.add_trace(go.Bar(name=col_name, x=_anom_ms["Model"],
+                                          y=_anom_ms[col_name],
+                                          marker_color=color, marker_line_width=0))
+            fig_anom.update_layout(**PLOTLY_BASE, barmode="group", height=300,
+                                   yaxis=dict(gridcolor=C_GRID, range=[0.7, 1.01], title="AUROC"))
+            st.plotly_chart(fig_anom, use_container_width=True)
     else:
         col_if, col_ae = st.columns(2, gap="large")
 
@@ -550,53 +566,54 @@ with tab_stress:
     )
 
     if not LIVE_MODE:
-        st.info("Live stress-test unavailable. Showing pre-computed robustness results.")
-        _mlr = pd.read_csv(os.path.join(RESULTS_DIR, "ml_robustness.csv"))
-        _dlr = pd.read_csv(os.path.join(RESULTS_DIR, "dl_robustness.csv"))
+        if not RESULTS_AVAILABLE:
+            _pending_publication()
+        else:
+            st.info("Live stress-test unavailable. Showing pre-computed robustness results.")
+            _mlr = pd.read_csv(os.path.join(RESULTS_DIR, "ml_robustness.csv"))
+            _dlr = pd.read_csv(os.path.join(RESULTS_DIR, "dl_robustness.csv"))
 
-        # Key-model comparison: LightGBM vs XGBoost vs DNN
-        _key = {"LightGBM": C_ORANGE, "XGBoost": C_WARN, "DNN": C_BLUE}
-        fig_key = go.Figure()
-        for _mdl, _col in _key.items():
-            _src = _dlr if _mdl == "DNN" else _mlr
-            _sub = _src[_src["Base_Model"] == _mdl].sort_values("Noise_Level")
-            if not _sub.empty:
-                fig_key.add_trace(go.Scatter(
+            _key = {"LightGBM": C_ORANGE, "XGBoost": C_WARN, "DNN": C_BLUE}
+            fig_key = go.Figure()
+            for _mdl, _col in _key.items():
+                _src = _dlr if _mdl == "DNN" else _mlr
+                _sub = _src[_src["Base_Model"] == _mdl].sort_values("Noise_Level")
+                if not _sub.empty:
+                    fig_key.add_trace(go.Scatter(
+                        x=_sub["Noise_Level"], y=_sub["Accuracy"] * 100,
+                        mode="lines+markers", name=_mdl,
+                        line=dict(color=_col, width=2.5),
+                        marker=dict(size=9),
+                    ))
+            fig_key.update_layout(
+                **PLOTLY_BASE, height=360,
+                title="Decision Cliff — Key Models vs. Gaussian Noise",
+                xaxis=dict(gridcolor=C_GRID, title="Noise σ"),
+                yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[0, 105]),
+                legend=dict(orientation="h", y=1.08),
+            )
+            st.plotly_chart(fig_key, use_container_width=True)
+
+            st.markdown('<div class="section-title">All ML Models — Robustness Curves</div>',
+                        unsafe_allow_html=True)
+            _ml_palette = [C_ORANGE, C_WARN, C_BLUE, C_AQUA, C_GOOD, C_CRITICAL]
+            fig_all = go.Figure()
+            for _i, _mdl in enumerate(_mlr["Base_Model"].unique()):
+                _sub = _mlr[_mlr["Base_Model"] == _mdl].sort_values("Noise_Level")
+                fig_all.add_trace(go.Scatter(
                     x=_sub["Noise_Level"], y=_sub["Accuracy"] * 100,
                     mode="lines+markers", name=_mdl,
-                    line=dict(color=_col, width=2.5),
-                    marker=dict(size=9),
+                    line=dict(color=_ml_palette[_i % len(_ml_palette)], width=2),
+                    marker=dict(size=7),
                 ))
-        fig_key.update_layout(
-            **PLOTLY_BASE, height=360,
-            title="Decision Cliff — Key Models vs. Gaussian Noise",
-            xaxis=dict(gridcolor=C_GRID, title="Noise σ"),
-            yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[0, 105]),
-            legend=dict(orientation="h", y=1.08),
-        )
-        st.plotly_chart(fig_key, use_container_width=True)
-
-        # All ML models
-        st.markdown('<div class="section-title">All ML Models — Robustness Curves</div>',
-                    unsafe_allow_html=True)
-        _ml_palette = [C_ORANGE, C_WARN, C_BLUE, C_AQUA, C_GOOD, C_CRITICAL]
-        fig_all = go.Figure()
-        for _i, _mdl in enumerate(_mlr["Base_Model"].unique()):
-            _sub = _mlr[_mlr["Base_Model"] == _mdl].sort_values("Noise_Level")
-            fig_all.add_trace(go.Scatter(
-                x=_sub["Noise_Level"], y=_sub["Accuracy"] * 100,
-                mode="lines+markers", name=_mdl,
-                line=dict(color=_ml_palette[_i % len(_ml_palette)], width=2),
-                marker=dict(size=7),
-            ))
-        fig_all.update_layout(
-            **PLOTLY_BASE, height=320,
-            title="ML Model Robustness under Noise",
-            xaxis=dict(gridcolor=C_GRID, title="Noise σ"),
-            yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[0, 105]),
-            legend=dict(orientation="h", y=1.08),
-        )
-        st.plotly_chart(fig_all, use_container_width=True)
+            fig_all.update_layout(
+                **PLOTLY_BASE, height=320,
+                title="ML Model Robustness under Noise",
+                xaxis=dict(gridcolor=C_GRID, title="Noise σ"),
+                yaxis=dict(gridcolor=C_GRID, title="Accuracy (%)", range=[0, 105]),
+                legend=dict(orientation="h", y=1.08),
+            )
+            st.plotly_chart(fig_all, use_container_width=True)
     else:
         noise_lvl = st.slider("Noise level σ", 0.0, 0.5, 0.05, 0.01)
 

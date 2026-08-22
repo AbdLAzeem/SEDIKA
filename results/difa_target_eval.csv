@@ -1,3 +1,0 @@
-scenario,accuracy,precision_w,recall_w,f1_weighted,f1_macro,latency_ms,footprint_mb,n_test_samples
-DIFA (Clean),0.7796,0.7665,0.7796,0.7484,0.3554,0.0078,0.09,235371
-DIFA (Noisy sigma=0.1),0.2867,0.283,0.2867,0.2586,0.1724,0.0078,0.09,235371

@@ -24,8 +24,9 @@ Journals to publish/
 
 # Internal exports & session artifacts
 exports/
-results/_*.log
-results/_*_status.txt
+
+# Research results — withheld pending official publication
+results/
 
 # Build artifacts
 *.egg-info/
