@@ -52,6 +52,5 @@ def load_and_analyze_data(filepath):
         print(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    # Using absolute path as per user environment
-    FILE_PATH = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/RT_IOT2022.csv"
-    load_and_analyze_data(FILE_PATH)
+    from paths import RAW_CSV
+    load_and_analyze_data(RAW_CSV)

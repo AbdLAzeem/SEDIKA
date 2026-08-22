@@ -1,11 +1,11 @@
 import pandas as pd
 import os
+from paths import PROCESSED_DIR
 
 def check_stats():
-    base_dir = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/processed_data"
-    train_path = os.path.join(base_dir, "train_data.pkl")
-    val_path = os.path.join(base_dir, "val_data.pkl")
-    test_path = os.path.join(base_dir, "test_data.pkl")
+    train_path = os.path.join(PROCESSED_DIR, "train_data.pkl")
+    val_path = os.path.join(PROCESSED_DIR, "val_data.pkl")
+    test_path = os.path.join(PROCESSED_DIR, "test_data.pkl")
     
     print("Loading Processed Data to generate statistics...")
     try:

@@ -11,20 +11,22 @@ from sklearn.svm import SVC
 import xgboost as xgb
 import lightgbm as lgb
 from ml_utils import evaluate_model, robustness_test
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import RandomizedSearchCV
+from paths import PROCESSED_DIR, MODEL_DIR, OUTPUT_DIR, ensure_dirs
 
-# Configuration
-OUTPUT_DIR = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/results"
-MODEL_DIR = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/models"
-for d in [OUTPUT_DIR, MODEL_DIR]:
-    if not os.path.exists(d):
-        os.makedirs(d)
+# Overridable seed for multi-seed runs
+_SEED = int(os.environ.get("SEDIKA_SEED", 42))
+np.random.seed(_SEED)
+
+ensure_dirs(OUTPUT_DIR, MODEL_DIR)
 
 def load_data():
-    base_dir = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/processed_data"
     print("Loading data...")
-    train = pd.read_pickle(os.path.join(base_dir, "train_data.pkl"))
-    val = pd.read_pickle(os.path.join(base_dir, "val_data.pkl"))
-    test = pd.read_pickle(os.path.join(base_dir, "test_data.pkl"))
+    # ML branch uses the SMOTE-balanced training pool (see preprocess_data.py).
+    train = pd.read_pickle(os.path.join(PROCESSED_DIR, "train_data_smote.pkl"))
+    val = pd.read_pickle(os.path.join(PROCESSED_DIR, "val_data.pkl"))
+    test = pd.read_pickle(os.path.join(PROCESSED_DIR, "test_data.pkl"))
     
     X_train = train.drop(columns=['target'])
     y_train = train['target']
@@ -40,71 +42,142 @@ def load_data():
 def train_models():
     X_train, y_train, X_val, y_val, X_test, y_test = load_data()
     
-    # Define Models
-    # Using specific params to speed up training for demo purposes where appropriate, 
-    # but keeping them robust enough for good results.
-    models = {
-        "Random Forest": RandomForestClassifier(n_estimators=50, n_jobs=-1, random_state=42),
-        "Decision Tree": DecisionTreeClassifier(random_state=42),
-        "KNN": KNeighborsClassifier(n_neighbors=5, n_jobs=-1),
-        "XGBoost": xgb.XGBClassifier(use_label_encoder=False, eval_metric='mlogloss', n_jobs=-1, random_state=42),
-        "LightGBM": lgb.LGBMClassifier(n_jobs=-1, random_state=42),
-        # SVM is computationally expensive on large datasets (800k rows). 
-        # We will use a subset for training or LinearSVC for speed? 
-        # Let's try RBF with a smaller max_iter or subset.
-        # Actually for 800k rows, SVM RBF will take forever. 
-        # STRATEGY: Train SVM on a sample (e.g. 50k) or skip.
-        # Let's train on 20% of training data for SVM to be realistic timely.
-        "SVM": SVC(kernel='rbf', max_iter=1000, random_state=42) 
+    # Define Models and Hyperparameter Grids
+    model_configs = {
+        "Random Forest": {
+            "model": RandomForestClassifier(random_state=_SEED),
+            "params": {
+                "n_estimators": [50, 100, 200],
+                "max_depth": [None, 10, 20],
+                "min_samples_split": [2, 5]
+            }
+        },
+        "Decision Tree": {
+            "model": DecisionTreeClassifier(random_state=_SEED),
+            "params": {
+                "max_depth": [None, 10, 20, 30],
+                "min_samples_split": [2, 5, 10]
+            }
+        },
+        "XGBoost": {
+            "model": xgb.XGBClassifier(use_label_encoder=False, eval_metric='mlogloss', random_state=_SEED),
+            "params": {
+                "n_estimators": [50, 100],
+                "learning_rate": [0.01, 0.1, 0.2],
+                "max_depth": [3, 5, 7]
+            }
+        },
+        "LightGBM": {
+            "model": lgb.LGBMClassifier(random_state=_SEED),
+            "params": {
+                "n_estimators": [50, 100],
+                "learning_rate": [0.01, 0.1],
+                "num_leaves": [31, 50]
+            }
+        },
+        "KNN": {
+            "model": KNeighborsClassifier(),
+            "params": {
+                "n_neighbors": [3, 5],
+                "weights": ["uniform", "distance"]
+            }
+        },
+        "SVM": {
+            "model": SVC(random_state=_SEED),
+            "params": {
+                "C": [1, 10],
+                "kernel": ["rbf"]
+            }
+        }
     }
     
     results = []
-    robustness_data = {}
+    robustness_data = []
+    tuning_log = []
     
-    print("\nStarting Training Loop...")
+    print("\nStarting Training & Tuning Loop...")
     
-    for name, model in models.items():
-        print(f"\nTraining {name}...")
+    # Optimization: Subsample for speed during development
+    if len(X_train) > 20000:
+        print(f"  Subsampling to 20,000 for faster demonstration...")
+        X_train = X_train.sample(n=20000, random_state=_SEED)
+        y_train = y_train.loc[X_train.index]
+
+    for name, config in model_configs.items():
+        print(f"\nProcessing {name}...")
+        model = config["model"]
+        param_grid = config["params"]
         
-        # Train
+        # 1. Evaluate Before Tuning (Base Model)
+        print(f"  Training Base Model...")
+        model.fit(X_train, y_train)
+        base_params = model.get_params()
+        
+        # 2. Hyperparameter Tuning
+        print(f"  Performing Hyperparameter Tuning (RandomizedSearch)...")
+        search = RandomizedSearchCV(model, param_grid, n_iter=2, cv=2, n_jobs=-1, random_state=_SEED)
+        search.fit(X_train, y_train)
+        
+        best_model = search.best_estimator_
+        best_params = search.best_params_
+        
+        tuning_log.append({
+            "Model": name,
+            "Params_Before": {k: base_params[k] for k in param_grid.keys() if k in base_params},
+            "Params_After": best_params
+        })
+        
+        # 3. Final Evaluation
+        print(f"  Final Evaluation of Best Model...")
         t0 = time.time()
-        if name == "SVM":
-            # Subsample for SVM
-            print("  (Subsampling for SVM speed...)")
-            X_sub = X_train.sample(n=50000, random_state=42)
-            y_sub = y_train.loc[X_sub.index]
-            model.fit(X_sub, y_sub)
-        else:
-            model.fit(X_train, y_train)
+        best_model.fit(X_train, y_train)
         train_time = time.time() - t0
-        print(f"  Training Time: {train_time:.2f}s")
         
-        # Save Model
-        model_path = os.path.join(MODEL_DIR, f"{name.lower().replace(' ', '_')}.pkl")
-        joblib.dump(model, model_path)
-        model_size_mb = os.path.getsize(model_path) / (1024 * 1024)
+        # Metrics on Train, Val, Test
+        train_acc = accuracy_score(y_train, best_model.predict(X_train))
+        val_acc = accuracy_score(y_val, best_model.predict(X_val))
         
-        # Evaluate on Test Set
-        metrics = evaluate_model(model, X_test, y_test, name, OUTPUT_DIR)
+        metrics = evaluate_model(best_model, X_test, y_test, name, OUTPUT_DIR)
+        metrics['Train_Accuracy'] = train_acc
+        metrics['Val_Accuracy'] = val_acc
         metrics['Training_Time_s'] = train_time
-        metrics['Model_Size_MB'] = model_size_mb
+        
+        # Fit Discussion heuristic
+        diff = train_acc - val_acc
+        if diff > 0.05:
+            fit_status = "Overfitting"
+        elif train_acc < 0.7:
+            fit_status = "Underfitting"
+        else:
+            fit_status = "Balanced"
+        metrics['Fit_Status'] = fit_status
+        
         results.append(metrics)
         
-        # Robustness Test
+        # 4. Robustness Test (Best Model)
         print("  Running Robustness Test...")
-        levels, accs = robustness_test(model, X_test, y_test, name)
-        robustness_data[name] = accs
+        levels, robust_metrics = robustness_test(best_model, X_test, y_test, name)
+        for lvl, m in zip(levels, robust_metrics):
+            m['Noise_Level'] = lvl
+            m['Base_Model'] = name
+            robustness_data.append(m)
+            
+        # Save Best Model
+        joblib.dump(best_model, os.path.join(MODEL_DIR, f"{name.lower().replace(' ', '_')}.pkl"))
 
     # Save Results
-    results_df = pd.DataFrame(results)
-    results_df.to_csv(os.path.join(OUTPUT_DIR, "ml_performance_metrics.csv"), index=False)
+    pd.DataFrame(results).to_csv(os.path.join(OUTPUT_DIR, "ml_performance_metrics.csv"), index=False)
+    pd.DataFrame(robustness_data).to_csv(os.path.join(OUTPUT_DIR, "ml_robustness.csv"), index=False)
+    pd.DataFrame(tuning_log).to_pickle(os.path.join(OUTPUT_DIR, "ml_tuning_log.pkl")) # Pickle for nested dicts
     
-    # Save Robustness Data
-    robust_df = pd.DataFrame(robustness_data, index=[f"Noise_{l}" for l in [0.01, 0.05, 0.1, 0.2]])
-    robust_df.to_csv(os.path.join(OUTPUT_DIR, "ml_robustness.csv"))
-    
-    print("\nTraining Complete. Results saved.")
-    print(results_df[['Model', 'Accuracy', 'Latency_ms', 'Model_Size_MB']])
+    # Save a readable tuning summary
+    with open(os.path.join(OUTPUT_DIR, "ml_tuning_summary.txt"), "w") as f:
+        for entry in tuning_log:
+            f.write(f"Model: {entry['Model']}\n")
+            f.write(f"  Before: {entry['Params_Before']}\n")
+            f.write(f"  After: {entry['Params_After']}\n\n")
+
+    print("\nTraining & Tuning Complete. Results saved.")
 
 if __name__ == "__main__":
     train_models()

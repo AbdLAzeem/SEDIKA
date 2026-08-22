@@ -79,7 +79,8 @@ def perform_visualizations(df):
     print("Visualizations logic ready.")
 
 if __name__ == "__main__":
-    file_path = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/RT_IOT2022.csv"
+    from paths import RAW_CSV
+    file_path = RAW_CSV
     
     # Reload data with cleaning
     if os.path.exists(file_path):

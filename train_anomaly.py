@@ -11,27 +11,20 @@ from sklearn.ensemble import IsolationForest
 from sklearn.metrics import roc_auc_score, precision_recall_curve, auc, roc_curve
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
+from paths import PROCESSED_DIR, MODEL_DIR, OUTPUT_DIR, PLOT_DIR, ensure_dirs
 
-# Configuration
-OUTPUT_DIR = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/results"
-MODEL_DIR = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/models"
-PLOT_DIR = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/plots"
-for d in [OUTPUT_DIR, MODEL_DIR, PLOT_DIR]:
-    if not os.path.exists(d):
-        os.makedirs(d)
+ensure_dirs(OUTPUT_DIR, MODEL_DIR, PLOT_DIR)
 
-tf.random.set_seed(42)
-np.random.seed(42)
+_SEED = int(os.environ.get("SEDIKA_SEED", 42))
+tf.random.set_seed(_SEED)
+np.random.seed(_SEED)
 
 def load_data():
-    base_dir = "c:/Users/mizal/.gemini/antigravity/scratch/iot_project_2/processed_data"
-    training_set = pd.read_pickle(os.path.join(base_dir, "train_data.pkl"))
-    test_set = pd.read_pickle(os.path.join(base_dir, "test_data.pkl"))
-    
-    # We need to identify "Normal" vs "Attack"
-    # In RT-IoT2022, let's assume 'Thing_Speak' related or similar as Normal if possible.
-    # However, the target is already encoded. We need the label encoder to know which is which.
-    le = joblib.load(os.path.join(base_dir, "label_encoder.joblib"))
+    # Anomaly model trains on the un-resampled pool to keep the benign manifold authentic.
+    training_set = pd.read_pickle(os.path.join(PROCESSED_DIR, "train_data.pkl"))
+    test_set = pd.read_pickle(os.path.join(PROCESSED_DIR, "test_data.pkl"))
+    from artifacts import load_artifact
+    le = load_artifact(os.path.join(PROCESSED_DIR, "label_encoder.joblib"))
     classes = le.classes_
     print(f"Classes: {classes}")
     
@@ -144,6 +137,10 @@ def train_autoencoder(X_train, X_test, y_test):
     
     return auc_score
 
+def add_gaussian_noise(X, noise_level=0.1):
+    noise = np.random.normal(0, noise_level, X.shape)
+    return X + noise
+
 def run_anomaly_detection():
     X_train_normal, X_test, y_test_binary = load_data()
     
@@ -157,10 +154,14 @@ def run_anomaly_detection():
     # Save IF Model
     if_model_path = os.path.join(MODEL_DIR, "if_model.joblib")
     joblib.dump(clf, if_model_path)
-    print(f"  Saved Isolation Forest to {if_model_path}")
-
-    y_scores_if = -clf.score_samples(X_test)
-    if_auc = roc_auc_score(y_test_binary, y_scores_if)
+    
+    # Evaluate IF
+    y_scores_if_clear = -clf.score_samples(X_test)
+    if_auc_clear = roc_auc_score(y_test_binary, y_scores_if_clear)
+    
+    X_test_noisy = add_gaussian_noise(X_test, noise_level=0.1)
+    y_scores_if_noisy = -clf.score_samples(X_test_noisy)
+    if_auc_noisy = roc_auc_score(y_test_binary, y_scores_if_noisy)
     
     # 2. Autoencoder
     print("\nTraining Autoencoder...")
@@ -179,35 +180,32 @@ def run_anomaly_detection():
                     epochs=20,
                     batch_size=64,
                     shuffle=True,
-                    verbose=0) # Squelch for clean output
+                    verbose=0)
     train_time_ae = time.time() - t0
     
-    # Save AE Model
-    ae_model_path = os.path.join(MODEL_DIR, "ae_model.keras")
-    autoencoder.save(ae_model_path)
-    print(f"  Saved Autoencoder to {ae_model_path}")
-
-    # Determine Threshold (95th percentile of reconstruction error on NORMAL train data)
-    train_reconstructions = autoencoder.predict(X_train_normal, verbose=0)
-    train_mse = np.mean(np.power(X_train_normal - train_reconstructions, 2), axis=1)
-    threshold = np.percentile(train_mse, 95)
-    
-    joblib.dump(threshold, os.path.join(MODEL_DIR, "ae_threshold.joblib"))
-    print(f"  Saved reconstruction threshold: {threshold:.4f}")
+    autoencoder.save(os.path.join(MODEL_DIR, "ae_model.keras"))
 
     # Evaluate AE
-    reconstructions = autoencoder.predict(X_test, verbose=0)
-    mse_test = np.mean(np.power(X_test - reconstructions, 2), axis=1)
-    ae_auc = roc_auc_score(y_test_binary, mse_test)
+    def get_ae_scores(model, X):
+        reconstructions = model.predict(X, verbose=0)
+        return np.mean(np.power(X - reconstructions, 2), axis=1)
+
+    mse_clear = get_ae_scores(autoencoder, X_test)
+    ae_auc_clear = roc_auc_score(y_test_binary, mse_clear)
+    
+    mse_noisy = get_ae_scores(autoencoder, X_test_noisy)
+    ae_auc_noisy = roc_auc_score(y_test_binary, mse_noisy)
     
     # Save Results
     results = pd.DataFrame({
         "Model": ["Isolation Forest", "Autoencoder"],
-        "AUROC": [if_auc, ae_auc],
+        "AUROC_Clear": [if_auc_clear, ae_auc_clear],
+        "AUROC_Noisy_0.1": [if_auc_noisy, ae_auc_noisy],
         "Train_Time_s": [train_time_if, train_time_ae]
     })
     results.to_csv(os.path.join(OUTPUT_DIR, "anomaly_detection_results.csv"), index=False)
     print("\nAnomaly Detection Complete.")
+    print("Identification: This evaluation covers BOTH Clear and Noisy (Level 0.1) scenarios.")
     print(results)
 
 if __name__ == "__main__":

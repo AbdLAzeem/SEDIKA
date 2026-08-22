@@ -27,7 +27,7 @@ def add_gaussian_noise(X, noise_level=0.05):
     X_noisy = X + noise
     return X_noisy
 
-def evaluate_model(model, X_test, y_test, model_name, output_dir):
+def evaluate_model(model, X_test, y_test, model_name, output_dir=None, quiet=False):
     # Inference Latency
     start_time = time.time()
     y_pred = model.predict(X_test)
@@ -39,10 +39,12 @@ def evaluate_model(model, X_test, y_test, model_name, output_dir):
     accuracy = accuracy_score(y_test, y_pred)
     precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average='weighted')
     
-    print(f"[{model_name}] Accuracy: {accuracy:.4f}, Latency: {latency_per_sample_ms:.4f} ms/sample")
+    if not quiet:
+        print(f"[{model_name}] Accuracy: {accuracy:.4f}, Latency: {latency_per_sample_ms:.4f} ms/sample")
     
     # Save Confusion Matrix
-    plot_confusion_matrix(y_test, y_pred, model_name, output_dir)
+    if output_dir:
+        plot_confusion_matrix(y_test, y_pred, model_name, output_dir)
     
     return {
         "Model": model_name,
@@ -60,8 +62,9 @@ def robustness_test(model, X_test, y_test, model_name):
     
     for lvl in noise_levels:
         X_noisy = add_gaussian_noise(X_test, noise_level=lvl)
-        y_pred = model.predict(X_noisy)
-        acc = accuracy_score(y_test, y_pred)
-        results.append(acc)
+        
+        # Get full metrics for robustness
+        metrics = evaluate_model(model, X_noisy, y_test, f"{model_name}_Noise_{lvl}", quiet=True)
+        results.append(metrics)
         
     return noise_levels, results

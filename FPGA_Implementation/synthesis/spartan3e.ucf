@@ -1,0 +1,40 @@
+# =====================================================================
+# spartan3e.ucf
+#
+# Xilinx ISE User Constraints File for the Digilent Spartan 3E Starter
+# Kit (XC3S500E-FG320). Pin assignments follow the Digilent reference
+# manual for the Spartan-3E Starter Board, Rev. C.
+#
+# This file is a *minimal* deployment configuration: clock, reset, a
+# `start` push-button trigger, and the anomaly_flag plus done indicators
+# routed to on-board LEDs. The 400-bit input vector x_flat is connected
+# to an internal pattern-generator wrapper for stand-alone demos; for
+# board-level integration with an external UART/SPI streamer, replace
+# the x_flat block with the appropriate I/O.
+#
+# Reference: Digilent Spartan-3E Starter Board, Reference Manual.
+# https://digilent.com/reference/programmable-logic/spartan-3e/start
+# =====================================================================
+
+# --- 50 MHz on-board oscillator (CLK) ---
+NET "clk"   LOC = "C9" | IOSTANDARD = LVCMOS33 ;
+NET "clk"   TNM_NET = clk_grp;
+TIMESPEC TS_clk = PERIOD "clk_grp" 20 ns HIGH 50%;   # 50 MHz
+
+# --- BTN_NORTH (active-high) wired to /rst_n via inversion in top wrapper ---
+NET "rst_n" LOC = "K17" | IOSTANDARD = LVCMOS33 | PULLUP ;
+
+# --- BTN_EAST -> start (single-cycle inference trigger) ---
+NET "start" LOC = "H13" | IOSTANDARD = LVCMOS33 | PULLUP ;
+
+# --- LD0  -> done indicator (asserted for 1 clock cycle on completion) ---
+NET "done"         LOC = "F12" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+# --- LD1  -> anomaly_flag (latched until next inference) ---
+NET "anomaly_flag" LOC = "E12" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+# --- LD2..LD7 -> bottom 6 bits of mse_sum_out for debug visibility ---
+NET "mse_sum_out<0>" LOC = "E11" | IOSTANDARD = LVCMOS33 ;
+NET "mse_sum_out<1>" LOC = "F11" | IOSTANDARD = LVCMOS33 ;
+NET "mse_sum_out<2>" LOC = "C11" | IOSTANDARD = LVCMOS33 ;
+NET "mse_sum_out<3>" LOC = "D11" | IOSTANDARD = LVCMOS33 ;
+NET "mse_sum_out<4>" LOC = "E9"  | IOSTANDARD = LVCMOS33 ;
+NET "mse_sum_out<5>" LOC = "F9"  | IOSTANDARD = LVCMOS33 ;

@@ -1,0 +1,9 @@
+// L2 per-channel requant packed: bits [31:16]=m_int, [4:0]=shift
+b60f0018
+d7ee0018
+a2c70018
+e3280018
+d3180018
+d5110018
+b8790018
+e4710018

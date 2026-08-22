@@ -8,6 +8,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 import matplotlib.pyplot as plt
 import shap
+from ml_utils import add_gaussian_noise
+from artifacts import load_artifact
 
 # Global Plot Defaults
 plt.rcParams['figure.facecolor'] = '#f8fafc'
@@ -83,9 +85,9 @@ def load_resources():
     ae_model = tf.keras.models.load_model(os.path.join(MODEL_DIR, "ae_model.keras"))
     ae_threshold = joblib.load(os.path.join(MODEL_DIR, "ae_threshold.joblib"))
     
-    # Scaler & Encoder
-    scaler = joblib.load(os.path.join(DATA_DIR, "scaler.joblib"))
-    le = joblib.load(os.path.join(DATA_DIR, "label_encoder.joblib"))
+    # Scaler & Encoder (manifest-validated)
+    scaler = load_artifact(os.path.join(DATA_DIR, "scaler.joblib"))
+    le = load_artifact(os.path.join(DATA_DIR, "label_encoder.joblib"))
     
     # Test Data
     test_data = pd.read_pickle(os.path.join(DATA_DIR, "test_data.pkl"))
@@ -106,12 +108,12 @@ feature_cols = test_df.drop(columns=['target']).columns.tolist()
 st.markdown('<div class="main-header">🛡️ RT-IoT2022 Advanced IDS Dashboard</div>', unsafe_allow_html=True)
 
 # Tabs
-tabs = st.tabs(["🚀 Real-time Monitor", "🔍 Threat Intelligence (SHAP)", "🧪 Anomaly Detection"])
+tabs = st.tabs(["🚀 Real-time Monitor", "🔍 Threat Intelligence (SHAP)", "🧪 Anomaly Detection", "🛡️ Robustness Stress-Test", "📉 Tree Boundary Jitter"])
 
 # Shared State
 if 'input_data' not in st.session_state:
     st.session_state['input_data'] = test_df.sample(1).drop(columns=['target'])
-    st.session_state['true_label'] = le.inverse_transform([test_df.loc[st.session_state['input_data'].index[0], 'target']])[0]
+    st.session_state['true_label'] = le.inverse_transform([int(test_df.loc[st.session_state['input_data'].index[0], 'target'])])[0]
 
 # --- TAB 1: MONITOR ---
 with tabs[0]:
@@ -122,7 +124,7 @@ with tabs[0]:
         if st.button("🎲 Generate Random Traffic"):
             sample = test_df.sample(1)
             st.session_state['input_data'] = sample.drop(columns=['target'])
-            st.session_state['true_label'] = le.inverse_transform([sample['target'].values[0]])[0]
+            st.session_state['true_label'] = le.inverse_transform([int(sample['target'].values[0])])[0]
             st.rerun()
             
         model_choice = st.selectbox("Select Classification Engine", ["LightGBM (Fastest)", "DNN (Robust)"])
@@ -155,7 +157,7 @@ with tabs[0]:
                 # Get new sample
                 sample = test_df.sample(1)
                 data = sample.drop(columns=['target']).values
-                true_lbl = le.inverse_transform([sample['target'].values[0]])[0]
+                true_lbl = le.inverse_transform([int(sample['target'].values[0])])[0]
                 
                 # Predict
                 if model_choice.startswith("LightGBM"):
@@ -166,7 +168,7 @@ with tabs[0]:
                     pred_idx = np.argmax(pred_probs, axis=1)[0]
                     conf = np.max(pred_probs)
                 
-                pred_label = le.inverse_transform([pred_idx])[0]
+                pred_label = le.inverse_transform([int(pred_idx)])[0]
                 
                 with placeholder.container():
                     st.write(f"🔍 Analyzing packet: **{true_lbl}**")
@@ -193,7 +195,7 @@ with tabs[0]:
                 pred_idx = np.argmax(pred_probs, axis=1)[0]
                 conf = np.max(pred_probs)
                 
-            pred_label = le.inverse_transform([pred_idx])[0]
+            pred_label = le.inverse_transform([int(pred_idx)])[0]
             
             # Gauge Chart
             fig = go.Figure(go.Indicator(
@@ -344,6 +346,137 @@ with tabs[2]:
     )
     st.plotly_chart(fig, use_container_width=True)
 
+# --- TAB 4: STRESS TEST ---
+with tabs[3]:
+    st.subheader("Wireless Robustness Stress-Test")
+    st.markdown("Simulate wireless interference by injecting Gaussian noise into the signal.")
+    
+    noise_lvl = st.slider("Signal Noise Level (Sigma)", 0.0, 0.5, 0.05, 0.01)
+    
+    col_s1, col_s2 = st.columns(2)
+    
+    # Inject Noise
+    clean_data = st.session_state['input_data'].values
+    noisy_data = add_gaussian_noise(clean_data, noise_level=noise_lvl)
+    
+    with col_s1:
+        st.write("#### Noise Impact Analysis")
+        # DNN Prediction on Noisy Data
+        pred_probs = dnn_model.predict(noisy_data, verbose=0)
+        pred_idx = np.argmax(pred_probs, axis=1)[0]
+        conf = np.max(pred_probs)
+        pred_label = le.inverse_transform([int(pred_idx)])[0]
+        
+        st.metric("Noisy Prediction", pred_label)
+        st.metric("Confidence", f"{conf*100:.1f}%")
+        
+        if pred_label == st.session_state['true_label']:
+            st.success("✅ Model Resilient: Prediction remains correct.")
+        else:
+            st.error(f"❌ Model Flipped: Prediction changed to {pred_label}")
+            
+    with col_s2:
+        st.write("#### Visual Signal Degradation")
+        # Compare first few features
+        feat_to_show = feature_cols[:10]
+        comp_df = pd.DataFrame({
+            "Feature": feat_to_show,
+            "Clean": clean_data[0][:10],
+            "Noisy": noisy_data[0][:10]
+        }).set_index("Feature")
+        
+        st.line_chart(comp_df)
+        
+    # SHAP shift analysis
+    st.write("---")
+    st.subheader("Shift in Feature Importance under Noise")
+    if st.button("🧬 Analyze Importance Shift"):
+        with st.spinner("Calculating shifted SHAP values..."):
+            explainer = shap.TreeExplainer(lgbm_model)
+            # Use LightGBM for speed in SHAP interactives
+            shap_clean = explainer.shap_values(clean_data)[pred_idx][0]
+            shap_noisy = explainer.shap_values(noisy_data)[pred_idx][0]
+            
+            shift_df = pd.DataFrame({
+                "Feature": feature_cols,
+                "Clean Importance": np.abs(shap_clean),
+                "Noisy Importance": np.abs(shap_noisy)
+            }).sort_values("Clean Importance", ascending=False).head(10)
+            
+            fig_shift = go.Figure()
+            fig_shift.add_trace(go.Bar(name='Clean', x=shift_df['Feature'], y=shift_df['Clean Importance'], marker_color='#3b82f6'))
+            fig_shift.add_trace(go.Bar(name='Noisy', x=shift_df['Feature'], y=shift_df['Noisy Importance'], marker_color='#ef4444'))
+            fig_shift.update_layout(barmode='group', title="Top 10 Feature Importance Shift", paper_bgcolor=PLOT_BG)
+            st.plotly_chart(fig_shift, use_container_width=True)
+
+# --- TAB 5: BOUNDARY JITTER ---
+with tabs[4]:
+    st.subheader("Tree-Model Decision Boundary Vulnerability")
+    st.markdown("Examine how minor rigid feature perturbation pushes predictions over thresholds drastically compared to Neural Networks.")
+    
+    jitter_feature = st.selectbox("Select Feature to Perturb", ['fwd_pkts_payload.avg', 'id.resp_p', 'flow_duration'])
+    if jitter_feature not in feature_cols:
+        st.warning(f"Feature {jitter_feature} not in dataset.")
+    else:
+        sample_idx = 100 
+        sample_data = test_df.iloc[[sample_idx]].drop(columns=['target']).copy()
+        true_lbl_base = le.inverse_transform([int(test_df.iloc[sample_idx]['target'])])[0]
+        
+        target_idx = feature_cols.index(jitter_feature)
+        base_val = sample_data.iloc[0, target_idx]
+        
+        st.info(f"Base Sample target = {true_lbl_base} | Initial {jitter_feature} = {base_val:.4f} (Scaled)")
+        
+        jitter_range = st.slider("Boundary Shift Range (Scaled Units)", -2.0, 2.0, (-0.5, 0.5), step=0.01)
+        
+        if st.button("📊 Simulate Decision Boundaries"):
+            with st.spinner(f"Perturbing {jitter_feature}..."):
+                perturbations = np.linspace(base_val + jitter_range[0], base_val + jitter_range[1], 300)
+                perturbed_df = pd.concat([sample_data] * 300).reset_index(drop=True)
+                perturbed_df[jitter_feature] = perturbations
+                
+                # Predict
+                probs = lgbm_model.predict_proba(perturbed_df)
+                preds = np.argmax(probs, axis=1)
+                base_class_idx = preds[len(preds)//2] # Center point class
+                
+                # SHAP
+                explainer = shap.TreeExplainer(lgbm_model)
+                shap_vals = explainer.shap_values(perturbed_df)
+                
+                if isinstance(shap_vals, list):
+                    shap_target = shap_vals[base_class_idx][:, target_idx]
+                else:
+                    shap_target = shap_vals[:, target_idx]
+                
+                # Plotly Chart
+                import plotly.graph_objects as go
+                from plotly.subplots import make_subplots
+                
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                fig.add_trace(
+                    go.Scatter(x=perturbations, y=probs[:, base_class_idx], name="Class Probability", line=dict(color="#3b82f6")),
+                    secondary_y=False,
+                )
+                
+                fig.add_trace(
+                    go.Scatter(x=perturbations, y=shap_target, name="SHAP Contribution", line=dict(color="#ef4444")),
+                    secondary_y=True,
+                )
+                
+                fig.update_layout(
+                    title_text=f"SHAP Jitter Impact on {jitter_feature}",
+                    paper_bgcolor=PLOT_BG, plot_bgcolor=PLOT_BG
+                )
+                fig.update_xaxes(title_text="Perturbed Value")
+                fig.update_yaxes(title_text="Probability", secondary_y=False)
+                fig.update_yaxes(title_text="SHAP Value", secondary_y=True)
+                
+                st.plotly_chart(fig, use_container_width=True)
+                st.markdown("> **Observation**: The sudden 'cliff' in the SHAP Contribution line proves the rigidity of Orthogonal Tree Thresholds. A micro-change flips the output drastically, demonstrating why models like LightGBM fail on cross-dataset translation.")
+
+
 st.sidebar.markdown("---")
 st.sidebar.caption("Project: IoT IDS RT-IoT2022")
-st.sidebar.info("Dashboard v2.0 - With XAI & Anomaly Support")
+st.sidebar.info("Dashboard v3.1 - Boundary Testing")

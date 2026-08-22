@@ -4,16 +4,30 @@ __pycache__/
 *$py.class
 .venv/
 .env
+*.pyc
 
-# Large Models (GitHub Limit 100MB)
+# Large raw data (too big for git — download instructions in README)
+RT_IOT2022.csv
+CICIoT2023-test.csv
+processed_data/
+processed_external/
+
+# Large model binaries (exceed GitHub 100MB limit)
 models/knn.pkl
 models/random_forest.pkl
 models/svm.pkl
-plots/
-processed_data/
-reports/
-results/
-final_reports/
 
-# Reports (Optional, but usually we don't commit generated reports if they are large artifacts, keeping them for now except huge ones)
-# Just strict exclusions requested:
+# Private research & manuscript drafts (not for public portfolio)
+Paper_Draft_v12/
+Thesis_Draft/
+Journals to publish/
+
+# Internal exports & session artifacts
+exports/
+results/_*.log
+results/_*_status.txt
+
+# Build artifacts
+*.egg-info/
+dist/
+build/

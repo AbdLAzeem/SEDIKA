@@ -1,0 +1,17 @@
+// L1 per-channel requant packed: bits [31:16]=m_int, [4:0]=shift
+f92e0018
+ea410018
+82d20017
+e4740018
+878d0017
+ec8b0018
+d8420018
+bf3d0018
+a61b0017
+cfbc0018
+e5af0018
+d1950018
+ca800018
+a28e0018
+944a0017
+d75a0018
