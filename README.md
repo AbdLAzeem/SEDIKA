@@ -32,6 +32,7 @@
 - [Real-Time Dashboard](#real-time-dashboard)
 - [Installation & Usage](#installation--usage)
 - [Project Structure](#project-structure)
+- [Research Data Availability](#research-data-availability)
 - [Citation](#citation)
 
 ---
@@ -338,6 +339,28 @@ SEDIKA/
 ├── results/                    # Experiment CSVs (multi-seed, per-class, adversarial)
 └── models/                     # Trained model binaries
 ```
+
+---
+
+## Research Data Availability
+
+The numerical results, per-class reports, robustness curves, and novel model weights of this project are **withheld from the public repository** pending official publication.
+
+| Asset | Status |
+|-------|--------|
+| Source code & training scripts | ✅ Public |
+| Standard model weights (LightGBM, XGBoost, DNN, CNN …) | ✅ Public |
+| Live dashboard ([azeem-sedika.streamlit.app](https://azeem-sedika.streamlit.app/)) | ✅ Public |
+| `results/` — accuracy tables, confusion matrices, robustness CSVs | 🔒 Withheld |
+| `models/sedika_difa_v2.keras` — DIFA transfer-learning weights | 🔒 Withheld |
+| `models/sedika_ae_adapted.keras` — FPR-budget Autoencoder weights | 🔒 Withheld |
+| `models/sedika_ae_threshold.joblib` — calibrated anomaly threshold | 🔒 Withheld |
+
+**Why:** Some journals restrict pre-publication disclosure of numerical findings. Full results will be released upon acceptance in *Computers & Security*, Elsevier.
+
+**When:** All withheld assets will be made publicly available in this repository immediately upon official publication. The live dashboard will automatically switch from demo mode to full results mode at that point.
+
+> **Note for reviewers:** Complete experimental data, confusion matrices, and per-seed raw results are available on request via the corresponding author.
 
 ---
 
