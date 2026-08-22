@@ -7,7 +7,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import tensorflow as tf
 import plotly.graph_objects as go
 import plotly.express as px
 import matplotlib
@@ -135,6 +134,7 @@ DATA_DIR  = (os.path.join(BASE_DIR, "processed_data")
 # ── Resource loading ──────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Loading models…")
 def load_resources():
+    import tensorflow as tf  # lazy — not needed until models are actually loaded
     lgbm     = joblib.load(os.path.join(MODEL_DIR, "lightgbm.pkl"))
     dnn      = tf.keras.models.load_model(os.path.join(MODEL_DIR, "dnn.keras"))
     if_mod   = joblib.load(os.path.join(MODEL_DIR, "if_model.joblib"))
