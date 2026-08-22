@@ -336,12 +336,12 @@ SEDIKA/
 This work is currently **under peer review**. If you use this codebase in your research, please cite:
 
 ```bibtex
-@article{abdelazeem2025sedika,
+@article{abdelazeem2026sedika,
   title     = {SEDIKA: A Robust Multi-Tier Intrusion Detection System for IoT Networks
                with Adversarial Evaluation and Cross-Domain Adaptation},
-  author    = {AbdElAzeem, AbdElAziz},
-  journal   = {Under review},
-  year      = {2025}
+  author    = {AbdElAzeem},
+  journal   = {Computers & Security,Elsevier Under review},
+  year      = {2026}
 }
 ```
 
