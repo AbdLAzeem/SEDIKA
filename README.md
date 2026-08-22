@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Paper-Under%20Review-yellow" alt="Paper"/>
 </p>
 
-> **SEDIKA** is a multi-tier Intrusion Detection System for IoT networks that combines supervised ML, deep learning, unsupervised anomaly detection, and cross-domain transfer learning — all backed by SHAP-based explainability and a real-time Streamlit dashboard. Evaluated across **10 model architectures** on the **RT-IoT2022** dataset with **3-seed statistical validation**.
+> **SEDIKA** is a multi-tier Intrusion Detection System for IoT networks that combines supervised ML, deep learning, unsupervised anomaly detection, and cross-domain transfer learning   all backed by SHAP-based explainability and a real-time Streamlit dashboard. Evaluated across **10 model architectures** on the **RT-IoT2022** dataset with **3-seed statistical validation**.
 
 ---
 
@@ -24,9 +24,9 @@
 - [Results at a Glance](#results-at-a-glance)
 - [The Decision Cliff Phenomenon](#the-decision-cliff-phenomenon)
 - [Adversarial Robustness](#adversarial-robustness)
-- [Cross-Domain Transfer — DIFA](#cross-domain-transfer--difa)
+- [Cross-Domain Transfer   DIFA](#cross-domain-transfer--difa)
 - [Anomaly Detection](#anomaly-detection)
-- [Explainability — SHAP](#explainability--shap)
+- [Explainability   SHAP](#explainability--shap)
 - [Real-Time Dashboard](#real-time-dashboard)
 - [Installation & Usage](#installation--usage)
 - [Project Structure](#project-structure)
@@ -38,10 +38,10 @@
 
 | # | Contribution |
 |---|---|
-| 1 | **Decision Cliff** — first systematic characterization of classical ML brittleness vs. DNN robustness under Gaussian noise in IoT traffic |
-| 2 | **FPR-Budget Autoencoder** — replaces the canonical P₉₅ static threshold with operational-budget calibration (0.51% achieved vs. 0.5% target), a 10× reduction in false alarms |
-| 3 | **DIFA** — Domain Invariant Feature Adaptation (CORAL + DANN + Entropy Minimisation) enabling zero-shot cross-domain transfer to CICIoT2023 |
-| 4 | **Multi-seed statistical validation** (seeds 42, 123, 7) with mean ± std reporting across all 10 models — addresses a common gap in IDS literature |
+| 1 | **Decision Cliff**   first systematic characterization of classical ML brittleness vs. DNN robustness under Gaussian noise in IoT traffic |
+| 2 | **FPR-Budget Autoencoder**   replaces the canonical P₉₅ static threshold with operational-budget calibration (0.51% achieved vs. 0.5% target), a 10× reduction in false alarms |
+| 3 | **DIFA**   Domain Invariant Feature Adaptation (CORAL + DANN + Entropy Minimisation) enabling zero-shot cross-domain transfer to CICIoT2023 |
+| 4 | **Multi-seed statistical validation** (seeds 42, 123, 7) with mean ± std reporting across all 10 models   addresses a common gap in IDS literature |
 
 ---
 
@@ -53,9 +53,9 @@
 
 SEDIKA operates as a **three-tier detection pipeline**:
 
-1. **Tier 1 — Fast Triage:** Lightweight classical models (LightGBM, Decision Tree) intercept known attack patterns at sub-millisecond latency.
-2. **Tier 2 — Deep Scrutiny:** A class-weighted DNN provides robust classification; CNN/LSTM/GRU act as specialist auditors.
-3. **Tier 3 — Anomaly Fallback:** Isolation Forest + FPR-budget-calibrated Autoencoder detect zero-day threats outside the training distribution.
+1. **Tier 1   Fast Triage:** Lightweight classical models (LightGBM, Decision Tree) intercept known attack patterns at sub-millisecond latency.
+2. **Tier 2   Deep Scrutiny:** A class-weighted DNN provides robust classification; CNN/LSTM/GRU act as specialist auditors.
+3. **Tier 3   Anomaly Fallback:** Isolation Forest + FPR-budget-calibrated Autoencoder detect zero-day threats outside the training distribution.
 
 ---
 
@@ -63,7 +63,7 @@ SEDIKA operates as a **three-tier detection pipeline**:
 
 Results are mean ± std across **3 independent seeds** (42, 123, 7).
 
-### Supervised Models — RT-IoT2022 Test Set
+### Supervised Models   RT-IoT2022 Test Set
 
 | Model | Accuracy | F1-Score | Latency (ms/sample) |
 |-------|----------|----------|---------------------|
@@ -83,17 +83,17 @@ Results are mean ± std across **3 independent seeds** (42, 123, 7).
 | Model | AUROC (Clean) | AUROC (Noisy σ=0.1) | FPR |
 |-------|--------------|---------------------|-----|
 | **Autoencoder** (FPR-budget) | 0.9791 ± 0.0013 | 0.9743 ± 0.0035 | **0.51%** |
-| **Isolation Forest** | 0.9544 | 0.7765 ± 0.0056 | — |
+| **Isolation Forest** | 0.9544 | 0.7765 ± 0.0056 |   |
 
 ---
 
 ## The Decision Cliff Phenomenon
 
 <p align="center">
-  <img src="plots/figure2_accuracy_trap.png" alt="Decision Cliff — accuracy under Gaussian noise" width="700"/>
+  <img src="plots/figure2_accuracy_trap.png" alt="Decision Cliff   accuracy under Gaussian noise" width="700"/>
 </p>
 
-> **Finding:** Classical ML models that achieve >99% accuracy under clean conditions collapse catastrophically under minimal Gaussian noise — while SEDIKA's DNN core maintains near-full accuracy.
+> **Finding:** Classical ML models that achieve >99% accuracy under clean conditions collapse catastrophically under minimal Gaussian noise   while SEDIKA's DNN core maintains near-full accuracy.
 
 | Model | Clean Accuracy | σ = 0.01 | σ = 0.05 | **σ = 0.1** |
 |-------|---------------|----------|----------|------------|
@@ -101,7 +101,7 @@ Results are mean ± std across **3 independent seeds** (42, 123, 7).
 | XGBoost | 98.98% | 81.2% | 59.1% | **47.34%** |
 | **DNN (SEDIKA)** | ~99% | 99.1% | 98.6% | **97.13%** |
 
-This "Decision Cliff" is not model-specific — it is a structural consequence of how tree-based models partition feature space, making them fundamentally brittle to the sensor noise and quantization artifacts present in real IoT deployments.
+This "Decision Cliff" is not model-specific   it is a structural consequence of how tree-based models partition feature space, making them fundamentally brittle to the sensor noise and quantization artifacts present in real IoT deployments.
 
 ---
 
@@ -114,12 +114,12 @@ This "Decision Cliff" is not model-specific — it is a structural consequence o
 Evaluation under **FGSM** and **PGD** attacks (ε ∈ {0.025, 0.05, 0.1, 0.2}) on the source-domain adapted DIFA model. SEDIKA's DNN core degrades gracefully compared to the decision-tree family, which collapses near ε = 0.05.
 
 Scripts:
-- [`adversarial_eval.py`](adversarial_eval.py) — single-model adversarial evaluation
-- [`adversarial_cross_domain.py`](adversarial_cross_domain.py) — cross-domain adversarial evaluation
+- [`adversarial_eval.py`](adversarial_eval.py)   single-model adversarial evaluation
+- [`adversarial_cross_domain.py`](adversarial_cross_domain.py)   cross-domain adversarial evaluation
 
 ---
 
-## Cross-Domain Transfer — DIFA
+## Cross-Domain Transfer   DIFA
 
 <p align="center">
   <img src="plots/figure5_difa_convergence.png" alt="DIFA training convergence" width="700"/>
@@ -144,10 +144,10 @@ Scripts:
 The domain discriminator converging to within 0.005 of the theoretical maximum-confusion point formally validates domain-invariant feature learning.
 
 Key files:
-- [`sedika_difa_v2.py`](sedika_difa_v2.py) — DIFA-2.2 training with `LossWeights` dataclass
-- [`difa_ablation.py`](difa_ablation.py) — ablation harness (source-only / CORAL-only / DANN-only / full-DIFA)
-- [`eval_difa_target.py`](eval_difa_target.py) — evaluation on target domain
-- [`sedika_ae_adaptation.py`](sedika_ae_adaptation.py) — Autoencoder adaptation for the target domain
+- [`sedika_difa_v2.py`](sedika_difa_v2.py)   DIFA-2.2 training with `LossWeights` dataclass
+- [`difa_ablation.py`](difa_ablation.py)   ablation harness (source-only / CORAL-only / DANN-only / full-DIFA)
+- [`eval_difa_target.py`](eval_difa_target.py)   evaluation on target domain
+- [`sedika_ae_adaptation.py`](sedika_ae_adaptation.py)   Autoencoder adaptation for the target domain
 
 ---
 
@@ -162,25 +162,25 @@ Target FPR: 0.5% → Achieved FPR: 0.51% (n = 5,542 benign samples)
 10× reduction in nuisance alerts vs. the P₉₅ baseline
 ```
 
-The Autoencoder threshold is calibrated at inference time via binary search over the reconstruction-error distribution — no retraining required when the FPR budget changes.
+The Autoencoder threshold is calibrated at inference time via binary search over the reconstruction-error distribution   no retraining required when the FPR budget changes.
 
 ```python
-# sedika_ae_adaptation.py — calibrate threshold to an FPR budget
+# sedika_ae_adaptation.py   calibrate threshold to an FPR budget
 threshold = calibrate_fpr_threshold(ae_model, X_benign, fpr_budget=0.005)
 ```
 
 ---
 
-## Explainability — SHAP
+## Explainability   SHAP
 
 <p align="center">
-  <img src="plots/figure4_decision_cliff_shap.png" alt="SHAP feature attribution — LightGBM vs DNN" width="700"/>
+  <img src="plots/figure4_decision_cliff_shap.png" alt="SHAP feature attribution   LightGBM vs DNN" width="700"/>
 </p>
 
 Every prediction in the dashboard exposes **SHAP values** for per-sample feature attribution. The SHAP audit reveals *why* LightGBM collapses: its top-3 features are network-rate ratios (easily perturbed), while DNN distributes attribution across 24 features, yielding structural robustness.
 
 <p align="center">
-  <img src="plots/figure6_radar_fingerprint.png" alt="Behavioural envelope radar — ARP poisoning vs Thing_Speak" width="600"/>
+  <img src="plots/figure6_radar_fingerprint.png" alt="Behavioural envelope radar   ARP poisoning vs Thing_Speak" width="600"/>
 </p>
 
 The **radar fingerprint** visualises each attack class's behavioural envelope across the top-6 SHAP features, enabling human-readable threat signatures for the SOC analyst.
@@ -189,7 +189,7 @@ Notebook: [`shap_robustness_analysis.ipynb`](shap_robustness_analysis.ipynb)
 
 ---
 
-## Edge Deployment — FPGA Implementation
+## Edge Deployment   FPGA Implementation
 
 <p align="center">
   <img src="https://img.shields.io/badge/FPGA-Spartan%203E-blue" alt="FPGA"/>
@@ -228,7 +228,7 @@ Three integrated views:
 | Tab | Description |
 |-----|-------------|
 | **Real-Time** | Simulated IoT traffic stream with live attack classification and alert timeline |
-| **XAI** | Per-prediction SHAP waterfall charts — explain any single packet classification |
+| **XAI** | Per-prediction SHAP waterfall charts   explain any single packet classification |
 | **Anomaly** | Reconstruction-error distribution with threshold slider and zero-day detection |
 
 ---
@@ -276,7 +276,7 @@ streamlit run app.py
 All experiments support the `SEDIKA_SEED` environment variable:
 
 ```bash
-# Run multi-seed evaluation (seeds 42, 123, 7) — results in results/multi_seed_summary.csv
+# Run multi-seed evaluation (seeds 42, 123, 7)   results in results/multi_seed_summary.csv
 python multi_seed_runner.py --seeds 42 123 7
 ```
 
