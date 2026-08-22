@@ -1,4 +1,5 @@
-# SEDIKA — Robust IoT Intrusion Detection System
+# SEDIKA
+### **S**ecure **E**dge **D**omain robust **I**ntrusion **K**nowledge **A**rchitecture
 
 <p align="center">
   <img src="plots/figure1_architecture_v3.png" alt="SEDIKA Architecture" width="800"/>
