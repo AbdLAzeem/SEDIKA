@@ -218,6 +218,12 @@ Model weights are quantized to **INT8** via [`quantize_ae.py`](FPGA_Implementati
 ## Real-Time Dashboard
 
 <p align="center">
+  <a href="https://azeem-sedika.streamlit.app/" target="_blank">
+    <img src="https://img.shields.io/badge/Open%20Live%20Dashboard-azeem--sedika.streamlit.app-FF4B4B?logo=streamlit&logoColor=white&style=for-the-badge" alt="Live Dashboard"/>
+  </a>
+</p>
+
+<p align="center">
   <img src="plots/dashboard_preview.png" alt="SEDIKA Dashboard — Real-Time Monitor and Decision Cliff tabs" width="900"/>
 </p>
 
