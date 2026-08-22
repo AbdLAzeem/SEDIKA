@@ -6,9 +6,11 @@
 </p>
 
 <p align="center">
+  <a href="https://azeem-sedika.streamlit.app/" target="_blank">
+    <img src="https://img.shields.io/badge/Live%20Dashboard-azeem--sedika.streamlit.app-FF4B4B?logo=streamlit&logoColor=white" alt="Live Dashboard"/>
+  </a>
   <img src="https://img.shields.io/badge/Python-3.8+-blue?logo=python" alt="Python"/>
   <img src="https://img.shields.io/badge/TensorFlow-2.x-orange?logo=tensorflow" alt="TensorFlow"/>
-  <img src="https://img.shields.io/badge/Streamlit-Dashboard-red?logo=streamlit" alt="Streamlit"/>
   <img src="https://img.shields.io/badge/Dataset-RT--IoT2022-green" alt="Dataset"/>
   <img src="https://img.shields.io/badge/Paper-Under%20Review-yellow" alt="Paper"/>
 </p>
