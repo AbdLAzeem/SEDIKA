@@ -216,20 +216,22 @@ Model weights are quantized to **INT8** via [`quantize_ae.py`](FPGA_Implementati
 ## Real-Time Dashboard
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Streamlit-Live%20Demo-red?logo=streamlit" alt="Dashboard"/>
+  <img src="plots/dashboard_preview.png" alt="SEDIKA Dashboard — Real-Time Monitor and Decision Cliff tabs" width="900"/>
 </p>
 
 ```bash
 streamlit run app.py
 ```
 
-Three integrated views:
+Five integrated views:
 
 | Tab | Description |
 |-----|-------------|
-| **Real-Time** | Simulated IoT traffic stream with live attack classification and alert timeline |
-| **XAI** | Per-prediction SHAP waterfall charts   explain any single packet classification |
-| **Anomaly** | Reconstruction-error distribution with threshold slider and zero-day detection |
+| **Real-Time Monitor** | Simulated IoT traffic stream with live attack classification and alert timeline |
+| **SHAP Explainability** | Per-prediction SHAP waterfall charts — explain any single packet classification |
+| **Anomaly Detection** | Reconstruction-error distribution with FPR-budget threshold slider and zero-day detection |
+| **Robustness Stress-Test** | Live Gaussian noise injection across all 10 models; real-time accuracy heatmap |
+| **Decision Cliff** | Accuracy vs. σ curves + SHAP attribution shift under noise — the flagship finding |
 
 ---
 
