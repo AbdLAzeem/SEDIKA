@@ -17,6 +17,11 @@ models/knn.pkl
 models/random_forest.pkl
 models/svm.pkl
 
+# Novel model weights — withheld pending official publication
+models/sedika_difa_v2.keras
+models/sedika_ae_adapted.keras
+models/sedika_ae_threshold.joblib
+
 # Private research & manuscript drafts (not for public portfolio)
 Paper_Draft_v12/
 Thesis_Draft/
